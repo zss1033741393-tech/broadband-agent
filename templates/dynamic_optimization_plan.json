@@ -1,0 +1,16 @@
+{
+  "dynamic_optimization_plan": {
+    "realtime_optimization": {
+      "enabled": false,
+      "qos_auto_adjust": false,
+      "load_balancing": false,
+      "congestion_control": false
+    },
+    "habit_pre_optimization": {
+      "enabled": false,
+      "learning_period_days": 7,
+      "pre_allocation_enabled": false,
+      "pre_allocation_advance_min": 30
+    }
+  }
+}

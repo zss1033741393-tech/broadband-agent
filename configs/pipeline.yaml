@@ -1,0 +1,5 @@
+pipeline:
+  max_retry_on_constraint_fail: 3
+  stage2_parallel: false      # true=并行填充（快），false=串行填充（省资源/调试用）
+  enable_stage3: true         # 是否启用约束校验（调试时可关闭）
+  enable_stage4: true         # 是否启用配置转译

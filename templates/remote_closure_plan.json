@@ -1,0 +1,21 @@
+{
+  "remote_closure_plan": {
+    "closure_options": {
+      "port_reset": false,
+      "bandwidth_adjustment": false,
+      "channel_switch": false,
+      "firmware_upgrade": false
+    },
+    "closure_strategy": {
+      "auto_execute": false,
+      "approval_required": true,
+      "max_retry": 3,
+      "retry_interval_min": 10
+    },
+    "audit_strategy": {
+      "audit_enabled": true,
+      "audit_interval_hour": 24,
+      "rollback_on_failure": true
+    }
+  }
+}

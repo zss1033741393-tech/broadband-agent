@@ -1,0 +1,24 @@
+{
+  "cei_perception_plan": {
+    "warning_threshold": {
+      "latency_ms": 100,
+      "packet_loss_rate": 0.01,
+      "jitter_ms": 30,
+      "throughput_min_mbps": 50
+    },
+    "scenario_model": {
+      "model_type": "default",
+      "custom_rules": []
+    },
+    "perception_granularity": {
+      "sampling_interval_sec": 300,
+      "aggregation_window_min": 15,
+      "per_user_enabled": false
+    },
+    "trigger_window": {
+      "enable_time": "00:00",
+      "disable_time": "23:59",
+      "weekday_only": false
+    }
+  }
+}

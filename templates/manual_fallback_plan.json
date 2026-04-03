@@ -1,0 +1,15 @@
+{
+  "manual_fallback_plan": {
+    "onsite_closure_strategy": {
+      "dispatch_enabled": false,
+      "dispatch_priority": "normal",
+      "sla_response_hour": 24,
+      "escalation_after_hour": 48
+    },
+    "guarantee_effect_analysis": {
+      "before_after_comparison": true,
+      "kpi_tracking_duration_day": 7,
+      "satisfaction_survey": false
+    }
+  }
+}

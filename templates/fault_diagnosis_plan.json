@@ -1,0 +1,15 @@
+{
+  "fault_diagnosis_plan": {
+    "diagnosis_method": {
+      "auto_ping": true,
+      "traceroute": true,
+      "speed_test": false,
+      "optical_power_check": true
+    },
+    "impact_assessment": {
+      "affected_user_threshold": 1,
+      "severity_filter": "all",
+      "service_type_filter": []
+    }
+  }
+}
