@@ -139,9 +139,6 @@ async def save_trace(
     component: str,
     input_data: Optional[dict] = None,
     output_data: Optional[dict] = None,
-    model: Optional[str] = None,
-    tokens_in: Optional[int] = None,
-    tokens_out: Optional[int] = None,
     latency_ms: Optional[float] = None,
     extra: Optional[dict] = None,
 ) -> None:
@@ -150,13 +147,10 @@ async def save_trace(
     Args:
         session_id: 会话 ID
         stage: Pipeline 阶段，如 "Stage1"、"Stage2"
-        event_type: 事件类型，如 "llm_call"、"tool_call"、"stage_start"、"stage_end"
+        event_type: 事件类型，如 "stage_start"、"stage_end"、"followup"、"error"
         component: 组件名，如 "IntentParser"
         input_data: 输入数据 dict
         output_data: 输出数据 dict
-        model: LLM 模型名（llm_call 时填写）
-        tokens_in: 输入 token 数
-        tokens_out: 输出 token 数
         latency_ms: 耗时毫秒
         extra: 附加信息 dict
     """
@@ -164,9 +158,8 @@ async def save_trace(
         await db.execute(
             """INSERT INTO agent_traces
                (session_id, stage, event_type, component,
-                input_data, output_data, model, tokens_in, tokens_out,
-                latency_ms, extra, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                input_data, output_data, latency_ms, extra, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 session_id,
                 stage,
@@ -174,9 +167,6 @@ async def save_trace(
                 component,
                 json.dumps(input_data, ensure_ascii=False) if input_data else None,
                 json.dumps(output_data, ensure_ascii=False) if output_data else None,
-                model,
-                tokens_in,
-                tokens_out,
                 latency_ms,
                 json.dumps(extra, ensure_ascii=False) if extra else None,
                 _now(),
@@ -197,8 +187,7 @@ async def get_traces(session_id: str) -> list[dict]:
     async with get_db() as db:
         cursor = await db.execute(
             """SELECT id, stage, event_type, component,
-                      input_data, output_data, model,
-                      tokens_in, tokens_out, latency_ms, extra, created_at
+                      input_data, output_data, latency_ms, extra, created_at
                FROM agent_traces
                WHERE session_id = ?
                ORDER BY id ASC""",

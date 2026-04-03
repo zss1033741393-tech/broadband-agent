@@ -33,8 +33,6 @@ def _build_agent(cfg: LLMConfig) -> Agent:
         name="IntentParser",
         model=model,
         instructions=_INSTRUCTIONS,
-        response_model=IntentGoal,
-        structured_outputs=True,
     )
 
 
@@ -93,10 +91,17 @@ async def parse_intent(
                 latency_ms=latency_ms,
             )
 
-        if isinstance(response.content, IntentGoal):
-            intent = response.content
+        content = response.content
+        if isinstance(content, IntentGoal):
+            intent = content
         else:
-            intent = IntentGoal.model_validate_json(str(response.content))
+            # 从文本响应中提取 JSON（模型可能包裹在 ```json ... ``` 中）
+            text = str(content)
+            start = text.find("{")
+            end = text.rfind("}") + 1
+            if start >= 0 and end > start:
+                text = text[start:end]
+            intent = IntentGoal.model_validate_json(text)
 
         logger.info(
             f"意图解析完成 | user_type={intent.user_type} "
