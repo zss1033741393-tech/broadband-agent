@@ -15,7 +15,7 @@ def setup_logging() -> None:
 
     config_path = "configs/logging.yaml"
     if os.path.exists(config_path):
-        with open(config_path) as f:
+        with open(config_path, encoding="utf-8") as f:
             config = yaml.safe_load(f)
         logging.config.dictConfig(config)
     else:

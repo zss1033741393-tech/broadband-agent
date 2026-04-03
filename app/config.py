@@ -35,7 +35,7 @@ def load_llm_config(stage: str) -> LLMConfig:
         对应 Stage 的 LLMConfig
     """
     config_path = "configs/llm.yaml"
-    with open(config_path) as f:
+    with open(config_path, encoding="utf-8") as f:
         cfg = yaml.safe_load(f)
 
     stage_cfg = cfg.get("stages", {}).get(stage, {})
@@ -63,7 +63,7 @@ def load_pipeline_config() -> PipelineConfig:
     if not os.path.exists(config_path):
         return PipelineConfig()
 
-    with open(config_path) as f:
+    with open(config_path, encoding="utf-8") as f:
         cfg = yaml.safe_load(f)
 
     pipeline_cfg = cfg.get("pipeline", {})
@@ -83,5 +83,5 @@ def load_skill(stage: str, skill_name: str) -> str:
     skill_path = f"skills/{stage}/{skill_name}.md"
     if not os.path.exists(skill_path):
         return ""
-    with open(skill_path) as f:
+    with open(skill_path, encoding="utf-8") as f:
         return f.read()
