@@ -1,0 +1,27 @@
+{
+  "plan_name": "远程闭环方案",
+  "version": "1.0",
+  "remote_closure": {
+    "enabled": true,
+    "closure_strategy": {
+      "auto_execute": false,
+      "require_approval": true,
+      "approval_timeout_sec": 300,
+      "fallback_to_manual": true
+    },
+    "actions": {
+      "restart_device": true,
+      "adjust_qos": true,
+      "switch_channel": true,
+      "bandwidth_reallocation": false
+    },
+    "sensitivity_guard": {
+      "high_sensitivity_period_check": true,
+      "block_during_guarantee_period": true
+    },
+    "notification": {
+      "notify_user": true,
+      "notify_engineer": false
+    }
+  }
+}

@@ -1,0 +1,31 @@
+{
+  "intent_goal": {
+    "user_type": {
+      "type": "string",
+      "description": "用户类型",
+      "examples": ["直播用户", "游戏用户", "办公用户", "视频用户"]
+    },
+    "scenario": {
+      "type": "string",
+      "description": "保障场景",
+      "examples": ["上行带宽保障", "低延迟保障", "稳定性保障"]
+    },
+    "guarantee_period": {
+      "start_time": { "type": "string", "format": "HH:MM" },
+      "end_time": { "type": "string", "format": "HH:MM" },
+      "is_periodic": { "type": "boolean", "default": false }
+    },
+    "guarantee_target": {
+      "priority_level": { "type": "string", "enum": ["high", "medium", "low"] },
+      "sensitivity": { "type": "string", "description": "用户敏感点，如卡顿/延迟/断线" },
+      "key_applications": { "type": "array", "items": "string", "examples": ["OBS", "抖音直播", "钉钉"] }
+    },
+    "core_metrics": {
+      "latency_sensitive": { "type": "boolean", "default": false },
+      "bandwidth_priority": { "type": "boolean", "default": false },
+      "stability_priority": { "type": "boolean", "default": false }
+    },
+    "resolution_requirement": { "type": "string", "examples": ["1080p", "4K", "720p"] }
+  },
+  "required_fields": ["user_type", "scenario", "guarantee_target"]
+}

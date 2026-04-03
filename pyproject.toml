@@ -1,0 +1,31 @@
+[project]
+name = "broadband-agent"
+version = "0.1.0"
+description = "家宽体验感知优化 Agent 智能体原型"
+requires-python = ">=3.11"
+
+dependencies = [
+    "agno>=1.0",
+    "fastapi>=0.115",
+    "uvicorn>=0.30",
+    "gradio>=5.0",
+    "pydantic>=2.0",
+    "openai>=1.50",
+    "pyyaml>=6.0",
+    "aiosqlite>=0.20",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
+ignore = ["E501"]
+
+[tool.ruff.format]
+quote-style = "double"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

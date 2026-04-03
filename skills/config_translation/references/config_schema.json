@@ -1,0 +1,53 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "DeviceConfigSchema",
+  "description": "设备可下发配置格式定义",
+  "type": "object",
+  "required": ["config_type", "version", "config_data"],
+  "properties": {
+    "config_type": {
+      "type": "string",
+      "enum": ["perception", "diagnosis", "closure", "optimization"]
+    },
+    "version": { "type": "string" },
+    "device_id": { "type": "string" },
+    "config_data": {
+      "type": "object",
+      "description": "具体配置内容，按 config_type 不同而不同"
+    },
+    "apply_time": {
+      "type": "string",
+      "description": "配置生效时间，ISO8601 格式或 immediate"
+    }
+  },
+  "definitions": {
+    "perception_config": {
+      "properties": {
+        "cei_warn_latency_threshold": { "type": "integer" },
+        "cei_warn_loss_threshold": { "type": "number" },
+        "cei_warn_jitter_threshold": { "type": "integer" },
+        "cei_collect_interval": { "type": "integer" },
+        "cei_per_user_mode": { "type": "boolean" },
+        "cei_trigger_start": { "type": "string" },
+        "cei_trigger_end": { "type": "string" }
+      }
+    },
+    "closure_config": {
+      "properties": {
+        "closure_auto_exec": { "type": "boolean" },
+        "closure_need_approval": { "type": "boolean" },
+        "closure_block_in_guarantee": { "type": "boolean" }
+      }
+    },
+    "optimization_config": {
+      "properties": {
+        "opt_realtime_enable": { "type": "boolean" },
+        "opt_qos_auto": { "type": "boolean" },
+        "opt_congestion_ctrl": { "type": "boolean" },
+        "opt_energy_save_enable": { "type": "boolean" },
+        "opt_energy_save_start": { "type": "string" },
+        "opt_energy_save_end": { "type": "string" }
+      }
+    }
+  }
+}

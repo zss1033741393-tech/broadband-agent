@@ -1,0 +1,42 @@
+# 日志配置
+
+version: 1
+disable_existing_loggers: false
+
+formatters:
+  standard:
+    format: "[%(asctime)s] [%(name)s] [%(levelname)s] %(message)s"
+    datefmt: "%Y-%m-%d %H:%M:%S"
+
+handlers:
+  console:
+    class: logging.StreamHandler
+    formatter: standard
+    stream: ext://sys.stdout
+
+  file_app:
+    class: logging.FileHandler
+    formatter: standard
+    filename: "./logs/app.log"
+    encoding: utf-8
+
+  file_agent:
+    class: logging.FileHandler
+    formatter: standard
+    filename: "./logs/agent.log"
+    encoding: utf-8
+
+loggers:
+  app:
+    level: DEBUG
+    handlers: [console, file_app]
+    propagate: false
+
+  agent:
+    level: DEBUG
+    handlers: [console, file_agent]
+    propagate: false
+
+root:
+  level: INFO
+  handlers: [console]

@@ -1,0 +1,28 @@
+{
+  "performance_constraints": {
+    "description": "网关和 NCE 性能约束规则",
+    "rules": [
+      {
+        "id": "PERF_001",
+        "name": "采集粒度限制",
+        "condition": "cei_perception.perception_granularity.sampling_interval_sec < 30",
+        "message": "采集间隔不能低于 30 秒，否则网关 CPU 负载过高",
+        "severity": "error"
+      },
+      {
+        "id": "PERF_002",
+        "name": "per_user 模式设备数限制",
+        "condition": "per_user_enabled == true AND device_user_count > 500",
+        "message": "开启 per_user 精细化感知时，单设备接入用户数不能超过 500",
+        "severity": "warning"
+      },
+      {
+        "id": "PERF_003",
+        "name": "并发诊断任务限制",
+        "condition": "fault_diagnosis.auto_diagnosis.enabled == true AND sampling_interval_sec < 60",
+        "message": "自动诊断开启时，采集间隔建议不低于 60 秒",
+        "severity": "warning"
+      }
+    ]
+  }
+}

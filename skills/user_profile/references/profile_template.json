@@ -1,0 +1,35 @@
+{
+  "user_profile": {
+    "user_type": "",
+    "scenario": "",
+    "guarantee_period": {
+      "start_time": "",
+      "end_time": "",
+      "is_periodic": false
+    },
+    "guarantee_target": {
+      "priority_level": "",
+      "sensitivity": "",
+      "key_applications": []
+    },
+    "core_metrics": {
+      "latency_sensitive": false,
+      "bandwidth_priority": false,
+      "stability_priority": false
+    }
+  },
+  "application_history": {
+    "perception_trigger_time": "",
+    "slice_enable_time": "",
+    "key_guarantee_apps": [],
+    "energy_saving_trigger_time": ""
+  },
+  "network_kpi": {
+    "periodic_power_off": false,
+    "power_off_alarm_reported": true,
+    "periodic_behavior_pattern": "",
+    "avg_upstream_mbps": 0,
+    "avg_downstream_mbps": 0,
+    "avg_latency_ms": 0
+  }
+}

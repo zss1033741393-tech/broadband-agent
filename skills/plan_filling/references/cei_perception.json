@@ -1,0 +1,28 @@
+{
+  "plan_name": "CEI感知方案",
+  "version": "1.0",
+  "cei_perception": {
+    "enabled": true,
+    "warning_threshold": {
+      "latency_ms": 100,
+      "packet_loss_rate": 0.01,
+      "jitter_ms": 30,
+      "bandwidth_util_rate": 0.9
+    },
+    "perception_granularity": {
+      "per_user_enabled": false,
+      "sampling_interval_sec": 300,
+      "report_interval_sec": 600
+    },
+    "trigger_window": {
+      "start_time": "00:00",
+      "end_time": "23:59",
+      "all_day": true
+    },
+    "alert_policy": {
+      "consecutive_violations": 3,
+      "alert_channel": "nce",
+      "auto_trigger_optimization": false
+    }
+  }
+}

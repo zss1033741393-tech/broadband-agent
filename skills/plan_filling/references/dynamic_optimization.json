@@ -1,0 +1,29 @@
+{
+  "plan_name": "动态优化方案",
+  "version": "1.0",
+  "dynamic_optimization": {
+    "enabled": true,
+    "realtime_optimization": {
+      "enabled": false,
+      "qos_auto_adjust": false,
+      "congestion_control": false,
+      "channel_auto_switch": true
+    },
+    "habit_pre_optimization": {
+      "enabled": false,
+      "pre_optimize_minutes_before": 10,
+      "learn_period_days": 7
+    },
+    "energy_saving": {
+      "enabled": true,
+      "trigger_time": "02:00",
+      "resume_time": "06:00",
+      "conflict_check": true
+    },
+    "wifi_optimization": {
+      "roaming_optimization": true,
+      "coverage_optimization": false,
+      "band_steering": true
+    }
+  }
+}

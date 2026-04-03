@@ -1,0 +1,19 @@
+# 模型配置 — Agent 级别，创建 Agent 时绑定，Skills 不声明模型
+
+models:
+  main:
+    api_key: "sk-xxx"
+    base_url: "https://api.openai.com/v1"
+    model: "gpt-4o"
+    temperature: 0.7
+    max_tokens: 4096
+
+  lightweight:
+    api_key: "sk-xxx"
+    base_url: "https://api.openai.com/v1"
+    model: "gpt-4o-mini"
+    temperature: 0.3
+    max_tokens: 2048
+
+# 默认使用的模型 key
+default: main

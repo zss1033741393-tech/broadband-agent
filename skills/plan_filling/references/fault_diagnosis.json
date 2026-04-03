@@ -1,0 +1,27 @@
+{
+  "plan_name": "故障诊断方案",
+  "version": "1.0",
+  "fault_diagnosis": {
+    "enabled": true,
+    "auto_diagnosis": {
+      "enabled": true,
+      "trigger_on_alert": true,
+      "diagnosis_timeout_sec": 60
+    },
+    "diagnosis_items": [
+      "line_quality",
+      "device_status",
+      "traffic_anomaly",
+      "dns_resolution",
+      "wifi_interference"
+    ],
+    "root_cause_analysis": {
+      "enabled": true,
+      "max_depth": 3
+    },
+    "report": {
+      "include_suggestion": true,
+      "format": "json"
+    }
+  }
+}

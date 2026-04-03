@@ -1,0 +1,43 @@
+{
+  "conflict_matrix": {
+    "description": "方案间策略冲突检测矩阵",
+    "conflicts": [
+      {
+        "id": "CONF_001",
+        "name": "节能时段与保障时段冲突",
+        "condition": "energy_saving.trigger_time 在 guarantee_period 时段内",
+        "affected_plans": ["dynamic_optimization", "cei_perception"],
+        "message": "节能触发时间与重点用户保障时段重叠，节能策略会降低感知精度",
+        "severity": "error",
+        "suggestion": "将节能触发时间调整到保障时段之外"
+      },
+      {
+        "id": "CONF_002",
+        "name": "WiFi 漫游与覆盖优化冲突",
+        "condition": "roaming_optimization == true AND coverage_optimization == true",
+        "affected_plans": ["dynamic_optimization"],
+        "message": "WiFi 漫游优化与覆盖优化不能同时开启，会产生策略冲突",
+        "severity": "error",
+        "suggestion": "关闭 coverage_optimization，保留 roaming_optimization"
+      },
+      {
+        "id": "CONF_003",
+        "name": "高敏感期间远程自动闭环",
+        "condition": "auto_execute == true AND block_during_guarantee_period == false",
+        "affected_plans": ["remote_closure"],
+        "message": "高敏感业务期间远程自动闭环可能中断业务，建议开启保障期屏蔽",
+        "severity": "warning",
+        "suggestion": "开启 sensitivity_guard.block_during_guarantee_period"
+      },
+      {
+        "id": "CONF_004",
+        "name": "APPflow 与重点用户行为策略冲突",
+        "condition": "appflow_enabled == true AND key_user_behavior_policy == true",
+        "affected_plans": ["dynamic_optimization"],
+        "message": "APPflow 策略与重点用户行为策略可能相互干扰",
+        "severity": "warning",
+        "suggestion": "关闭 APPflow 或重点用户行为策略，保留高优先级策略"
+      }
+    ]
+  }
+}

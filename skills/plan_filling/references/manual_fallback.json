@@ -1,0 +1,28 @@
+{
+  "plan_name": "人工兜底方案",
+  "version": "1.0",
+  "manual_fallback": {
+    "enabled": true,
+    "trigger_conditions": {
+      "auto_closure_failed": true,
+      "diagnosis_inconclusive": true,
+      "user_complaint_received": true,
+      "high_priority_user": false
+    },
+    "dispatch_policy": {
+      "priority_level": "medium",
+      "expected_response_minutes": 30,
+      "assign_to": "local_engineer",
+      "remote_assist_first": true
+    },
+    "escalation": {
+      "enabled": true,
+      "escalate_after_minutes": 60,
+      "escalate_to": "senior_engineer"
+    },
+    "sla": {
+      "resolve_within_hours": 4,
+      "notify_user_on_timeout": true
+    }
+  }
+}

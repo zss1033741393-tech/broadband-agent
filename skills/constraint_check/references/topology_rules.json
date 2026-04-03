@@ -1,0 +1,28 @@
+{
+  "topology_constraints": {
+    "description": "组网方式约束规则",
+    "rules": [
+      {
+        "id": "TOPO_001",
+        "name": "设备纳管要求",
+        "condition": "remote_closure.enabled == true AND device_managed == false",
+        "message": "远程闭环需要设备已纳管到 NCE，当前设备未纳管",
+        "severity": "error"
+      },
+      {
+        "id": "TOPO_002",
+        "name": "WiFi 优化版本要求",
+        "condition": "wifi_optimization.roaming_optimization == true AND device_firmware < '2.0'",
+        "message": "WiFi 漫游优化需要固件版本 2.0 以上",
+        "severity": "warning"
+      },
+      {
+        "id": "TOPO_003",
+        "name": "QoS 调整权限要求",
+        "condition": "realtime_optimization.qos_auto_adjust == true AND qos_permission == false",
+        "message": "QoS 自动调整需要设备具备 QoS 配置权限",
+        "severity": "error"
+      }
+    ]
+  }
+}

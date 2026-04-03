@@ -1,0 +1,49 @@
+{
+  "device_capabilities": {
+    "description": "设备型号能力矩阵",
+    "devices": [
+      {
+        "model": "HG8145X6",
+        "type": "ONT",
+        "firmware_min": "V300R019",
+        "capabilities": {
+          "managed": true,
+          "per_user_cei": true,
+          "qos_control": true,
+          "wifi_roaming_opt": true,
+          "wifi_coverage_opt": false,
+          "remote_closure": true,
+          "max_users": 256
+        }
+      },
+      {
+        "model": "HG8145V5",
+        "type": "ONT",
+        "firmware_min": "V300R017",
+        "capabilities": {
+          "managed": true,
+          "per_user_cei": false,
+          "qos_control": true,
+          "wifi_roaming_opt": false,
+          "wifi_coverage_opt": false,
+          "remote_closure": true,
+          "max_users": 128
+        }
+      },
+      {
+        "model": "AX3000",
+        "type": "Router",
+        "firmware_min": "2.0",
+        "capabilities": {
+          "managed": true,
+          "per_user_cei": true,
+          "qos_control": true,
+          "wifi_roaming_opt": true,
+          "wifi_coverage_opt": true,
+          "remote_closure": false,
+          "max_users": 64
+        }
+      }
+    ]
+  }
+}
