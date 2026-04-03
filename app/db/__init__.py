@@ -10,6 +10,8 @@ from app.db.crud import (
     get_pipeline_output,
     save_trace,
     get_traces,
+    save_llm_trace,
+    get_llm_traces,
 )
 
 __all__ = [
@@ -25,4 +27,6 @@ __all__ = [
     "get_pipeline_output",
     "save_trace",
     "get_traces",
+    "save_llm_trace",
+    "get_llm_traces",
 ]

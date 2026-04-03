@@ -100,7 +100,7 @@ async def run_pipeline(
         )
 
         with log_step(logger, "Stage1 意图解析"):
-            intent = await parse_intent(user_input, user_id, dialog_history)
+            intent = await parse_intent(user_input, user_id, dialog_history, session_id=state.session_id)
             state.intent_goal = intent
             await save_intent_goal(state.session_id, intent.model_dump())
 
@@ -142,7 +142,7 @@ async def run_pipeline(
             )
 
             with log_step(logger, f"Stage2 方案生成（attempt={attempt}）"):
-                plan_result = await fill_all_plans(intent, retry_hint, attempt)
+                plan_result = await fill_all_plans(intent, retry_hint, attempt, session_id=state.session_id)
                 await save_plan_result(state.session_id, plan_result.model_dump(), attempt)
 
             latency2 = (time.perf_counter() - t2) * 1000
@@ -170,7 +170,7 @@ async def run_pipeline(
             )
 
             with log_step(logger, f"Stage3 约束校验（attempt={attempt}）"):
-                check_result = await check_constraints(plan_result)
+                check_result = await check_constraints(plan_result, session_id=state.session_id)
 
             latency3 = (time.perf_counter() - t3) * 1000
             await _trace(

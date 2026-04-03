@@ -4,7 +4,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from app.agents.pipeline import PipelineState, run_pipeline
-from app.db.crud import get_pipeline_output, get_session, get_traces
+from app.db.crud import get_pipeline_output, get_session, get_traces, get_llm_traces
 
 router = APIRouter(prefix="/api/v1", tags=["pipeline"])
 
@@ -96,6 +96,26 @@ async def get_session_traces(session_id: str) -> list:
     traces = await get_traces(session_id)
     if not traces:
         raise HTTPException(status_code=404, detail="该会话暂无轨迹记录")
+    return traces
+
+
+@router.get("/llm-traces/{session_id}", response_model=list)
+async def get_session_llm_traces(session_id: str) -> list:
+    """查询会话的 LLM 请求级详细轨迹
+
+    每条记录对应一次 LLM API 调用，包含：
+    - model / temperature / max_tokens / is_stream：请求参数
+    - request_messages：发送给模型的完整 messages 数组（含 system/user/tool）
+    - response_content：模型最终回复文本
+    - reasoning_content：模型推理过程（CoT/thinking，支持 o1/deepseek-r1 等）
+    - tool_calls：模型发起的工具调用 [{id, name, arguments}]
+    - tool_results：工具执行结果 [{tool_call_id, name, content}]
+    - tokens_in / tokens_out / tokens_reasoning：token 用量
+    - latency_ms：本次请求耗时
+    """
+    traces = await get_llm_traces(session_id)
+    if not traces:
+        raise HTTPException(status_code=404, detail="该会话暂无 LLM 请求记录")
     return traces
 
 

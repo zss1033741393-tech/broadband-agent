@@ -1,11 +1,12 @@
 import json
+import time
 from typing import Optional
 
 from agno.agent import Agent
 from agno.models.openai import OpenAILike
 
-from app.config import load_llm_config, load_skill
-from app.logger import get_logger, log_step
+from app.config import LLMConfig, load_llm_config, load_skill
+from app.logger import get_logger, log_step, record_llm_trace
 from app.models.intent import IntentGoal
 from app.tools.profile_tools import load_user_profile, query_app_history, query_network_kpi
 
@@ -19,9 +20,8 @@ _INSTRUCTIONS = (
 )
 
 
-def _build_agent() -> Agent:
+def _build_agent(cfg: LLMConfig) -> Agent:
     """构建 Stage1 IntentParser Agent"""
-    cfg = load_llm_config("stage1_intent")
     model = OpenAILike(
         id=cfg.model,
         api_key=cfg.api_key,
@@ -42,6 +42,7 @@ async def parse_intent(
     user_input: str,
     user_id: str = "anonymous",
     history: Optional[list[dict]] = None,
+    session_id: str = "",
 ) -> IntentGoal:
     """Stage1：解析用户意图，缺失信息追问
 
@@ -49,6 +50,7 @@ async def parse_intent(
         user_input: 用户自然语言输入
         user_id: 用户 ID，用于加载历史画像
         history: 对话历史（追问补充场景）
+        session_id: 会话 ID（用于轨迹记录）
 
     Returns:
         结构化意图目标体 IntentGoal
@@ -59,7 +61,7 @@ async def parse_intent(
         app_history = await query_app_history(user_id)
         network_kpi = await query_network_kpi(user_id)
 
-        # 构建 prompt，注入历史数据
+        # 构建 prompt
         context_parts = [f"用户输入：{user_input}"]
         if profile_data.get("profile", {}).get("user_type"):
             context_parts.append(f"历史画像：{json.dumps(profile_data['profile'], ensure_ascii=False)}")
@@ -73,13 +75,27 @@ async def parse_intent(
         prompt = "\n\n".join(context_parts)
         prompt += "\n\n请解析用户意图并输出结构化 IntentGoal JSON。若有缺失必要信息，在 need_followup=true 中指定并写出追问内容。"
 
-        agent = _build_agent()
+        cfg = load_llm_config("stage1_intent")
+        agent = _build_agent(cfg)
+
+        t0 = time.perf_counter()
         response = await agent.arun(prompt)
+        latency_ms = (time.perf_counter() - t0) * 1000
+
+        # 记录 LLM 请求级轨迹
+        if session_id:
+            await record_llm_trace(
+                session_id=session_id,
+                stage="Stage1",
+                component="IntentParser",
+                llm_cfg=cfg,
+                response=response,
+                latency_ms=latency_ms,
+            )
 
         if isinstance(response.content, IntentGoal):
             intent = response.content
         else:
-            # fallback：尝试解析 JSON 字符串
             intent = IntentGoal.model_validate_json(str(response.content))
 
         logger.info(

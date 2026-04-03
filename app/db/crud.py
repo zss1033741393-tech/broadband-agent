@@ -216,6 +216,107 @@ async def get_traces(session_id: str) -> list[dict]:
         return result
 
 
+async def save_llm_trace(
+    session_id: str,
+    stage: str,
+    component: str,
+    model: str,
+    temperature: Optional[float] = None,
+    max_tokens: Optional[int] = None,
+    is_stream: bool = False,
+    request_messages: Optional[list] = None,
+    response_content: Optional[str] = None,
+    reasoning_content: Optional[str] = None,
+    tool_calls: Optional[list] = None,
+    tool_results: Optional[list] = None,
+    tokens_in: Optional[int] = None,
+    tokens_out: Optional[int] = None,
+    tokens_reasoning: Optional[int] = None,
+    latency_ms: Optional[float] = None,
+) -> None:
+    """保存单次 LLM 请求的完整轨迹
+
+    Args:
+        session_id: 会话 ID
+        stage: Pipeline 阶段
+        component: Agent 组件名
+        model: 模型名称
+        temperature: 温度参数
+        max_tokens: 最大输出 token
+        is_stream: 是否流式调用
+        request_messages: 发送给模型的完整 messages 数组
+        response_content: 模型最终回复文本
+        reasoning_content: 模型推理过程（CoT/thinking）
+        tool_calls: 模型发起的工具调用列表 [{id, name, arguments}]
+        tool_results: 工具执行结果列表 [{tool_call_id, name, content}]
+        tokens_in: 输入 token 数
+        tokens_out: 输出 token 数
+        tokens_reasoning: 推理 token 数
+        latency_ms: 本次请求耗时（毫秒）
+    """
+    async with get_db() as db:
+        await db.execute(
+            """INSERT INTO llm_traces
+               (session_id, stage, component, model, temperature, max_tokens, is_stream,
+                request_messages, response_content, reasoning_content,
+                tool_calls, tool_results,
+                tokens_in, tokens_out, tokens_reasoning, latency_ms, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                session_id,
+                stage,
+                component,
+                model,
+                temperature,
+                max_tokens,
+                1 if is_stream else 0,
+                json.dumps(request_messages, ensure_ascii=False) if request_messages else None,
+                response_content,
+                reasoning_content,
+                json.dumps(tool_calls, ensure_ascii=False) if tool_calls else None,
+                json.dumps(tool_results, ensure_ascii=False) if tool_results else None,
+                tokens_in,
+                tokens_out,
+                tokens_reasoning,
+                latency_ms,
+                _now(),
+            ),
+        )
+        await db.commit()
+
+
+async def get_llm_traces(session_id: str) -> list[dict]:
+    """查询会话的全部 LLM 请求轨迹，按时间顺序排列
+
+    Args:
+        session_id: 会话 ID
+
+    Returns:
+        LLM 请求轨迹列表，每条包含请求参数、messages、响应、token 用量等
+    """
+    async with get_db() as db:
+        cursor = await db.execute(
+            """SELECT id, stage, component, model, temperature, max_tokens, is_stream,
+                      request_messages, response_content, reasoning_content,
+                      tool_calls, tool_results,
+                      tokens_in, tokens_out, tokens_reasoning, latency_ms, created_at
+               FROM llm_traces
+               WHERE session_id = ?
+               ORDER BY id ASC""",
+            (session_id,),
+        )
+        rows = await cursor.fetchall()
+        result = []
+        for row in rows:
+            item = dict(row)
+            for field in ("request_messages", "tool_calls", "tool_results"):
+                if item[field]:
+                    item[field] = json.loads(item[field])
+            item["is_stream"] = bool(item["is_stream"])
+            result.append(item)
+        return result
+
+
 async def get_user_profile(user_id: str) -> Optional[dict]:
     """查询用户历史画像"""
     async with get_db() as db:
