@@ -49,6 +49,23 @@ CREATE TABLE IF NOT EXISTS user_profiles (
     network_kpi_json TEXT,
     updated_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS agent_traces (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id TEXT NOT NULL,
+    stage TEXT NOT NULL,            -- Stage1 / Stage2 / Stage3 / Stage4
+    event_type TEXT NOT NULL,       -- llm_call / tool_call / stage_start / stage_end
+    component TEXT NOT NULL,        -- IntentParser / PlanFiller / ConstraintChecker / ConfigTranslator
+    input_data TEXT,                -- 输入内容（JSON 字符串）
+    output_data TEXT,               -- 输出内容（JSON 字符串）
+    model TEXT,                     -- LLM 模型名（llm_call 时记录）
+    tokens_in INTEGER,              -- 输入 token 数
+    tokens_out INTEGER,             -- 输出 token 数
+    latency_ms REAL,                -- 耗时（毫秒）
+    extra TEXT,                     -- 附加信息（JSON 字符串）
+    created_at TEXT NOT NULL,
+    FOREIGN KEY (session_id) REFERENCES sessions(session_id)
+);
 """
 
 

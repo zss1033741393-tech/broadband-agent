@@ -132,6 +132,90 @@ async def save_user_profile(
         await db.commit()
 
 
+async def save_trace(
+    session_id: str,
+    stage: str,
+    event_type: str,
+    component: str,
+    input_data: Optional[dict] = None,
+    output_data: Optional[dict] = None,
+    model: Optional[str] = None,
+    tokens_in: Optional[int] = None,
+    tokens_out: Optional[int] = None,
+    latency_ms: Optional[float] = None,
+    extra: Optional[dict] = None,
+) -> None:
+    """保存 Agent 运行轨迹记录
+
+    Args:
+        session_id: 会话 ID
+        stage: Pipeline 阶段，如 "Stage1"、"Stage2"
+        event_type: 事件类型，如 "llm_call"、"tool_call"、"stage_start"、"stage_end"
+        component: 组件名，如 "IntentParser"
+        input_data: 输入数据 dict
+        output_data: 输出数据 dict
+        model: LLM 模型名（llm_call 时填写）
+        tokens_in: 输入 token 数
+        tokens_out: 输出 token 数
+        latency_ms: 耗时毫秒
+        extra: 附加信息 dict
+    """
+    async with get_db() as db:
+        await db.execute(
+            """INSERT INTO agent_traces
+               (session_id, stage, event_type, component,
+                input_data, output_data, model, tokens_in, tokens_out,
+                latency_ms, extra, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                session_id,
+                stage,
+                event_type,
+                component,
+                json.dumps(input_data, ensure_ascii=False) if input_data else None,
+                json.dumps(output_data, ensure_ascii=False) if output_data else None,
+                model,
+                tokens_in,
+                tokens_out,
+                latency_ms,
+                json.dumps(extra, ensure_ascii=False) if extra else None,
+                _now(),
+            ),
+        )
+        await db.commit()
+
+
+async def get_traces(session_id: str) -> list[dict]:
+    """查询会话的全部运行轨迹，按时间顺序排列
+
+    Args:
+        session_id: 会话 ID
+
+    Returns:
+        轨迹记录列表
+    """
+    async with get_db() as db:
+        cursor = await db.execute(
+            """SELECT id, stage, event_type, component,
+                      input_data, output_data, model,
+                      tokens_in, tokens_out, latency_ms, extra, created_at
+               FROM agent_traces
+               WHERE session_id = ?
+               ORDER BY id ASC""",
+            (session_id,),
+        )
+        rows = await cursor.fetchall()
+        result = []
+        for row in rows:
+            item = dict(row)
+            # 反序列化 JSON 字段
+            for field in ("input_data", "output_data", "extra"):
+                if item[field]:
+                    item[field] = json.loads(item[field])
+            result.append(item)
+        return result
+
+
 async def get_user_profile(user_id: str) -> Optional[dict]:
     """查询用户历史画像"""
     async with get_db() as db:

@@ -8,6 +8,8 @@ from app.db.crud import (
     get_plan_result,
     save_pipeline_output,
     get_pipeline_output,
+    save_trace,
+    get_traces,
 )
 
 __all__ = [
@@ -21,4 +23,6 @@ __all__ = [
     "get_plan_result",
     "save_pipeline_output",
     "get_pipeline_output",
+    "save_trace",
+    "get_traces",
 ]

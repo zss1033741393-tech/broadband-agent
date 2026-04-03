@@ -4,7 +4,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from app.agents.pipeline import PipelineState, run_pipeline
-from app.db.crud import get_pipeline_output, get_session
+from app.db.crud import get_pipeline_output, get_session, get_traces
 
 router = APIRouter(prefix="/api/v1", tags=["pipeline"])
 
@@ -80,6 +80,23 @@ async def get_output(session_id: str) -> dict:
     if not output:
         raise HTTPException(status_code=404, detail="该会话尚无输出配置")
     return output
+
+
+@router.get("/traces/{session_id}", response_model=list)
+async def get_session_traces(session_id: str) -> list:
+    """查询会话的 Agent 运行轨迹
+
+    返回该会话下所有 Stage 的执行轨迹，包括：
+    - stage_start / stage_end：各阶段的输入输出和耗时
+    - llm_call：LLM 调用记录（model、tokens、latency）
+    - tool_call：Tool 函数调用记录
+    - followup：追问事件
+    - error：异常事件
+    """
+    traces = await get_traces(session_id)
+    if not traces:
+        raise HTTPException(status_code=404, detail="该会话暂无轨迹记录")
+    return traces
 
 
 @router.get("/health")

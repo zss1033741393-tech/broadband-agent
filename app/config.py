@@ -41,8 +41,15 @@ def load_llm_config(stage: str) -> LLMConfig:
     stage_cfg = cfg.get("stages", {}).get(stage, {})
     default_cfg = cfg["default"]
 
+    # api_key：优先 yaml 中的值，留空则 fallback 到环境变量 LLM_API_KEY
+    api_key = (
+        stage_cfg.get("api_key")
+        or default_cfg.get("api_key")
+        or os.getenv("LLM_API_KEY", "")
+    )
+
     return LLMConfig(
-        api_key=os.getenv("LLM_API_KEY", ""),
+        api_key=api_key,
         base_url=stage_cfg.get("base_url", default_cfg["base_url"]),
         model=stage_cfg.get("model", default_cfg["model"]),
         temperature=stage_cfg.get("temperature", default_cfg["temperature"]),
