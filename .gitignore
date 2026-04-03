@@ -205,3 +205,8 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# 设计文档（仅本地维护，禁止提交）
+design.md
+*_design.md
+docs/design/

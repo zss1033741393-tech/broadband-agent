@@ -140,7 +140,8 @@ skill: Skills 变更（SKILL.md / scripts / references）
 
 ## 注意事项
 
-- 详细设计见 `design.md`
+- 详细设计见 `design.md`（**设计文档只在本地维护，禁止提交到 git**）
+- **禁止将 `design.md` 或任何设计/原型文档提交到版本库**，此类文档仅供本地参考
 - 不要在 Skill 外部建 `tools/` 或 `templates/` 目录
 - 不要在 SKILL.md 里加 model_tier 或任何模型相关字段
 - plan_filling 的 5 个模板可并行填充（asyncio.gather）
