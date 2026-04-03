@@ -1,6 +1,6 @@
-import os
 from contextlib import asynccontextmanager
 
+import gradio as gr
 from fastapi import FastAPI
 
 from app.api.routes import router
@@ -26,15 +26,14 @@ app = FastAPI(
 app.include_router(router)
 
 
-# 挂载 Gradio UI（可选，需安装 gradio）
+# 挂载 Gradio UI
+# Gradio 6 废弃了 app.mount()，改用 gr.mount_gradio_app()
 def mount_gradio() -> None:
     try:
-        import gradio as gr
         from ui.chat_ui import build_ui
 
         gradio_app = build_ui()
-        # 将 Gradio 挂载到 /ui 路径
-        app.mount("/ui", gradio_app)
+        gr.mount_gradio_app(app, gradio_app, path="/ui")
     except ImportError:
         pass
 

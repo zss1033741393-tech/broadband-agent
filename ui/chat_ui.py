@@ -1,4 +1,3 @@
-import asyncio
 import json
 from typing import Optional
 
@@ -9,25 +8,23 @@ from app.logger import setup_logging
 
 setup_logging()
 
-# 全局会话状态（单用户演示，生产环境需 per-session 状态管理）
-_session_state: dict = {}
-
 
 async def _handle_message(
     user_message: str,
     chat_history: list,
-    session_id: Optional[str],
+    session_id: str,
 ) -> tuple[list, str, str]:
-    """处理用户消息，驱动 Pipeline
+    """处理用户消息，驱动 Pipeline（async，Gradio 6 原生支持）
 
     Returns:
         (更新后的对话历史, session_id, 配置预览 JSON 文本)
     """
-    # 构建对话历史格式
-    dialog_history = [
-        {"role": "user" if i % 2 == 0 else "assistant", "content": msg[0] if i % 2 == 0 else msg[1]}
-        for i, msg in enumerate(chat_history)
-    ] if chat_history else None
+    # chat_history 格式：[{"role": "user/assistant", "content": "..."}]
+    dialog_history: Optional[list[dict]] = (
+        [{"role": m["role"], "content": m["content"]} for m in chat_history]
+        if chat_history
+        else None
+    )
 
     state: PipelineState = await run_pipeline(
         user_input=user_message,
@@ -36,7 +33,6 @@ async def _handle_message(
         dialog_history=dialog_history,
     )
 
-    # 构建回复消息
     if state.status == "waiting_followup":
         bot_reply = f"需要补充一些信息：\n\n{state.followup_question}"
         config_preview = "等待用户补充信息..."
@@ -48,7 +44,6 @@ async def _handle_message(
             if intent
             else ""
         )
-
         if state.output and state.output.output_files:
             files_list = "\n".join(f"- `{f}`" for f in state.output.output_files)
             bot_reply = (
@@ -56,7 +51,6 @@ async def _handle_message(
                 f"**Pipeline 完成！** 已生成以下配置文件：\n\n{files_list}\n\n"
                 f"配置预览见右侧面板。"
             )
-            # 取感知配置作为预览
             config_preview = json.dumps(
                 state.output.perception.model_dump(), ensure_ascii=False, indent=2
             )
@@ -70,22 +64,19 @@ async def _handle_message(
         bot_reply = "正在处理..."
         config_preview = "{}"
 
-    # 更新对话历史
-    chat_history = chat_history + [[user_message, bot_reply]]
-    return chat_history, state.session_id, config_preview
+    # Gradio 6 Chatbot 使用 messages 格式
+    new_history = list(chat_history) + [
+        {"role": "user", "content": user_message},
+        {"role": "assistant", "content": bot_reply},
+    ]
+    return new_history, "", state.session_id, config_preview
 
 
-def _sync_handle(user_message: str, chat_history: list, session_id: str):
-    """同步包装（Gradio 需要同步函数）"""
-    result = asyncio.run(
-        _handle_message(user_message, chat_history, session_id or None)
-    )
-    return result[0], "", result[1], result[2]
-
-
-def build_ui():
-    """构建 Gradio 对话调试界面"""
-    with gr.Blocks(title="家宽体验感知优化 Agent", theme=gr.themes.Soft()) as demo:
+def build_ui() -> gr.Blocks:
+    """构建 Gradio 对话调试界面（Gradio 6 兼容）"""
+    # Gradio 6：theme 不再放 Blocks()，挂载到 FastAPI 时 launch() 不会被调用，
+    # 所以直接在 Blocks 里用 css 或忽略主题
+    with gr.Blocks(title="家宽体验感知优化 Agent") as demo:
         gr.Markdown(
             """
             # 家宽体验感知优化 Agent
@@ -95,7 +86,8 @@ def build_ui():
 
         with gr.Row():
             with gr.Column(scale=2):
-                chatbot = gr.Chatbot(label="对话", height=500)
+                # Gradio 6 Chatbot 默认 type="messages"
+                chatbot = gr.Chatbot(label="对话", height=500, type="messages")
                 with gr.Row():
                     msg_input = gr.Textbox(
                         label="输入",
@@ -114,15 +106,13 @@ def build_ui():
         # 隐藏状态：session_id
         session_state = gr.State(value="")
 
-        # 发送按钮事件
         send_btn.click(
-            fn=_sync_handle,
+            fn=_handle_message,
             inputs=[msg_input, chatbot, session_state],
             outputs=[chatbot, msg_input, session_state, config_output],
         )
-        # 回车提交
         msg_input.submit(
-            fn=_sync_handle,
+            fn=_handle_message,
             inputs=[msg_input, chatbot, session_state],
             outputs=[chatbot, msg_input, session_state, config_output],
         )
@@ -141,4 +131,5 @@ def build_ui():
 
 if __name__ == "__main__":
     ui = build_ui()
-    ui.launch(server_port=7860, share=False)
+    # 独立运行时才在 launch() 里传 theme
+    ui.launch(server_port=7860, share=False, theme=gr.themes.Soft())
