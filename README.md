@@ -6,13 +6,21 @@
 
 ## 快速启动
 
-### 1. 安装依赖
+### 1. 安装 uv（推荐）
 
 ```bash
-pip install -e .
+pip install uv
 ```
 
-### 2. 配置环境变量
+### 2. 安装依赖
+
+```bash
+uv sync
+```
+
+> 也可用原生 pip：`pip install -e .`
+
+### 3. 配置环境变量
 
 ```bash
 cp .env.example .env
@@ -26,20 +34,20 @@ SQLITE_DB_PATH=./data/agent.db     # 数据库路径（默认即可）
 LOG_LEVEL=DEBUG                    # 日志级别
 ```
 
-### 3. 启动服务
+### 4. 启动服务
 
 ```bash
-uvicorn app.main:app --reload
+uv run uvicorn app.main:app --reload
 ```
 
 服务启动后：
 - **API 文档**：http://localhost:8000/docs
 - **Gradio 调试界面**：http://localhost:8000/ui
 
-### 4. 单独运行 Gradio 界面（开发调试）
+### 5. 单独运行 Gradio 界面（开发调试）
 
 ```bash
-python ui/chat_ui.py
+uv run python ui/chat_ui.py
 ```
 
 访问 http://localhost:7860
@@ -157,22 +165,22 @@ broadband-agent/
 
 ```bash
 # 启动开发服务器
-uvicorn app.main:app --reload
+uv run uvicorn app.main:app --reload
 
 # 运行所有单元测试（不含需要 LLM 的集成测试）
-pytest tests/ -m "not integration"
+uv run pytest tests/ -m "not integration"
 
 # 运行集成测试（需配置 LLM_API_KEY）
-pytest tests/ -m integration -v
+uv run pytest tests/ -m integration -v
 
 # 运行单个测试文件
-pytest tests/test_agents/test_intent_agent.py -v
+uv run pytest tests/test_agents/test_intent_agent.py -v
 
 # 代码检查
-ruff check .
+uv run ruff check .
 
 # 代码格式化
-ruff format .
+uv run ruff format .
 ```
 
 ---
