@@ -87,7 +87,7 @@ def build_ui() -> gr.Blocks:
         with gr.Row():
             with gr.Column(scale=2):
                 # Gradio 6 Chatbot 默认 type="messages"
-                chatbot = gr.Chatbot(label="对话", height=500, type="messages")
+                chatbot = gr.Chatbot(label="对话", height=500)
                 with gr.Row():
                     msg_input = gr.Textbox(
                         label="输入",
