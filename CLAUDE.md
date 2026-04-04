@@ -117,6 +117,37 @@ app = agent_os.get_app()
 9. **User Memory**：P1，用户系统就绪后启用 enable_memories
 10. **AgentOS**：替代手写 FastAPI/Tracer，原生 API + trace + Web UI
 11. **所有配置在 YAML**：configs/llm.yaml 含 api_key，没有 .env
+12. **阶段产出物持久化**：四个阶段产出（意图/画像/方案/配置）需写入 `outputs/` 供下游系统消费，见"架构演进计划"
+13. **Skills 与会话解耦**：脚本层不感知 session_id，产出物写入由 app 层负责（通过 AgentOS post-hook 或独立 OutputSink）
+
+## 架构演进计划
+
+### P1 — 阶段产出物持久化（下游交付）
+
+**背景**：四个阶段产出物（intent / profile / plans / configs）目前仅存在于 Agent context 和 AgentOS trace 中，无法直接交付给下游系统（如配置下发平台、数据分析系统）。
+
+**设计原则**：
+- Skills 脚本保持纯 stdout，不感知 session 或文件路径（职责分离）
+- 持久化逻辑在 app 层实现，不侵入 Skills
+
+**推荐实现**（待调研 AgentOS hook API 后确认）：
+```
+app/outputs/
+├── sink.py          # OutputSink: 监听 tool call 结果，按阶段写文件
+└── router.py        # FastAPI 路由: GET /outputs/{session_id}/{stage}
+```
+产出物路径：`outputs/{session_id}/{stage}.json`（intent / profile / plans / configs）
+下游系统通过 REST API 按 session_id 拉取，或订阅文件变更。
+
+**阻塞点**：需确认 AgentOS 是否暴露 tool call 完成的 post-hook 接口。
+
+### P2 — 上下文感知压缩（长对话）
+
+**背景**：约束校验重试循环（最多 3 次）会导致单次 run 内 tool call 结果堆积，context 膨胀影响模型决策质量。
+
+**设计思路**：监控当前 run 的 token 计数，超过阈值时将早期 tool 结果卸载到文件，context 中替换为占位符（`已归档: outputs/{session_id}/plans.json`），模型按需调用 `get_skill_reference` 读取。
+
+**现状**：Agno 暂无原生支持；当前链路最多 15 次工具调用，实际未触发瓶颈，暂不实现。待真实负载压测后评估。
 
 ## Commit 规范
 
