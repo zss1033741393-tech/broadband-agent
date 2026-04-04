@@ -1,35 +1,61 @@
-"""Gradio 调试界面 — 使用 Agno 原生 Agent API
+"""Gradio 调试界面 — 流式对话
 
-AgentOS 已提供完整的 REST/WS API 和 Trace 可视化，
-此界面作为对话调试的轻量补充，挂载在 /gradio 路径。
+通过 Agno agent.run(stream=True) 实现实时流式输出，
+用户在 Agent 调用 Skill、追问、生成方案过程中能看到逐步输出。
+
+挂载路径：/gradio（由 app/main.py 通过 gr.mount_gradio_app 挂载）
+独立启动：python ui/chat_ui.py（监听 7860 端口）
 """
 from __future__ import annotations
 
+from typing import Iterator
+
 import gradio as gr
 
+from agno.run.agent import RunEvent
 from app.agent.agent import get_agent
 
 
+def _stream_chat(message: str, history: list) -> Iterator[str]:
+    """流式对话生成器 — 供 Gradio ChatInterface 调用
+
+    Gradio 要求生成器 yield 累积字符串（非 delta），
+    每次 yield 刷新一次界面显示。
+
+    agent.run(stream=True) 返回 RunOutputEvent 迭代器，
+    只有 RunContent 事件携带文本 delta，其余事件（ToolCall、Reasoning 等）
+    透明跳过，不影响对话显示。
+    """
+    agent = get_agent()
+    accumulated = ""
+
+    try:
+        for event in agent.run(message, stream=True):
+            event_type = getattr(event, "event", None)
+
+            if event_type == RunEvent.run_content.value:
+                delta = getattr(event, "content", None)
+                if delta:
+                    accumulated += delta
+                    yield accumulated
+
+            elif event_type == RunEvent.run_error.value:
+                error = getattr(event, "error", "未知错误")
+                yield accumulated + f"\n\n[Agent 错误] {error}"
+                return
+
+    except Exception as exc:
+        yield accumulated + f"\n\n[系统错误] {exc}"
+
+
 def create_ui() -> gr.ChatInterface:
-    """创建 Gradio 调试界面"""
-
-    def chat(message: str, history: list) -> str:
-        """调用 Agno Agent，返回回复文本"""
-        agent = get_agent()
-        try:
-            response = agent.run(message)
-            if response and hasattr(response, "content") and response.content:
-                return response.content
-            return str(response) if response else "（无回复）"
-        except Exception as exc:
-            return f"[Agent 错误] {exc}"
-
+    """创建 Gradio ChatInterface（流式）"""
     return gr.ChatInterface(
-        fn=chat,
+        fn=_stream_chat,
         title="家宽体验感知优化 Agent — 调试界面",
         description=(
-            "**调试入口**：直接与 Agent 对话，测试意图解析、方案填充、约束校验全链路。\n\n"
-            "生产 API 由 AgentOS 提供（`/v1/agents/.../runs`）。"
+            "与 Agent 对话，测试意图解析、追问、方案填充、约束校验全链路。\n"
+            "Agent 调用 Skill 时界面实时更新，无需等待全部完成。"
         ),
         examples=[
             "我是直播用户，晚上 8 点到 12 点需要保障上行带宽，对卡顿比较敏感",
@@ -37,10 +63,10 @@ def create_ui() -> gr.ChatInterface:
             "视频会议老是卡，主要用腾讯会议，工作时间 9-18 点",
         ],
         theme=gr.themes.Soft(),
+        type="messages",
     )
 
 
 if __name__ == "__main__":
-    """直接运行时启动独立调试服务"""
     ui = create_ui()
     ui.launch(server_name="0.0.0.0", server_port=7860, share=False)
