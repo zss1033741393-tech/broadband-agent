@@ -3,7 +3,9 @@
 
 # reasoning 说明（模型特性，配在此文件而非 pipeline.yaml）：
 #   true  → 启用 Agno 推理链（仅适用原生推理模型：deepseek-reasoner / OpenAI o1/o3）
-#   false → 关闭（默认）；模型本身的 native thinking（如 qwen3 <think> 块）不受影响
+#           错误开启会导致：400 role=developer / ReasoningSteps 解析失败 / Gradio 无响应崩溃
+#   false → 关闭（默认，绝大多数模型）
+#           qwen3 的 native thinking (<think> 块) 不受此开关影响，仍正常输出
 
 # ── Anthropic Claude（原生集成，需 pip install anthropic）──────
 provider: "anthropic"
@@ -25,8 +27,9 @@ reasoning: false
 # ── 普通 OpenAI 兼容（qwen / gpt-4o / deepseek-chat 等）───────
 # provider: "openai"
 # api_key: "sk-xxx"
-# base_url: "https://your-endpoint/v1"
+# base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1"
 # model: "qwen3.5-27b"
-# temperature: 0.7
-# max_tokens: 8192
-# reasoning: false   ← 普通模型必须 false，否则 Agno 发 role=developer 报 400
+# temperature: 0.6
+# max_tokens: 32000
+# reasoning: false   ← 必须 false！qwen3 有自己的 native thinking，不需要 Agno 推理链
+#                      设为 true 会导致：22s+ 延迟、ReasoningSteps 解析报错、Gradio 崩溃
