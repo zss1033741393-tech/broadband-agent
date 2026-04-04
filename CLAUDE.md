@@ -186,6 +186,12 @@ pytest tests/ -v
 ruff check --fix . && ruff format .
 ```
 
+## 开发纪律（血泪教训）
+
+- **改了 Web 相关代码必须真实启动验证**：修改 `app/main.py`、`ui/chat_ui.py`、Gradio 相关逻辑后，必须在沙箱内实际执行 `uvicorn app.main:app --port 8001` 跑起来观察启动日志，不能只靠 import 检查或静态分析。纸面改代码不等于能跑。
+- **依赖包版本必须在沙箱中安装后才能写代码**：用到某个第三方库（如 gradio、uvicorn）的 API 时，必须先 `pip install` 在沙箱安装，再查签名/验证兼容性，不能凭记忆猜参数。未安装就写出的 API 调用大概率版本不兼容。
+- **`requirements.txt` 中的版本必须经过实测**：写入 `requirements.txt` 的版本约束（如 `gradio>=4.0`）必须基于在沙箱中实际安装并运行通过的版本，不能估算填写。
+
 ## 注意事项
 
 - 详细设计见 design.md（**设计文档只在本地维护，禁止提交到 git**）
