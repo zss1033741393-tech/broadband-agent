@@ -4,7 +4,10 @@ pipeline:
   num_history_runs: 10
   skills_dir: "./skills"
   debug_mode: true
-  reasoning: true
+  # reasoning: 仅在使用原生推理模型时开启（OpenAI o1/o3、deepseek-reasoner）
+  # 普通 OpenAI 兼容模型（qwen、gpt-4o 等）必须设为 false，
+  # 否则 Agno 会发送 role=developer 导致 400 错误
+  reasoning: false
   clarification_max_rounds: 3
   clarification_max_fields_per_round: 3
 
