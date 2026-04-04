@@ -18,6 +18,9 @@ class LLMConfig(BaseModel):
     temperature: float = 0.7
     max_tokens: int = 4096
     provider: str = "openai"  # openai（含 OpenAI 兼容接口）| anthropic
+    # 是否启用 Agno 推理链（仅原生推理模型开启：deepseek-reasoner / OpenAI o1/o3）
+    # 普通 OpenAI 兼容模型（qwen、gpt-4o、claude 等）保持 false
+    reasoning: bool = False
 
 
 class StorageConfig(BaseModel):
@@ -33,7 +36,6 @@ class PipelineConfig(BaseModel):
     num_history_runs: int = 10
     skills_dir: str = "./skills"
     debug_mode: bool = True
-    reasoning: bool = True
     clarification_max_rounds: int = 3
     clarification_max_fields_per_round: int = 3
 

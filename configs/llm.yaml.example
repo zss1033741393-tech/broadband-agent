@@ -1,26 +1,32 @@
 # 复制此文件为 llm.yaml 并填入真实配置
 # configs/llm.yaml 已加入 .gitignore，不会提交到 git
 
+# reasoning 说明（模型特性，配在此文件而非 pipeline.yaml）：
+#   true  → 启用 Agno 推理链（仅适用原生推理模型：deepseek-reasoner / OpenAI o1/o3）
+#   false → 关闭（默认）；模型本身的 native thinking（如 qwen3 <think> 块）不受影响
+
 # ── Anthropic Claude（原生集成，需 pip install anthropic）──────
 provider: "anthropic"
 api_key: "sk-ant-xxx"
-model: "claude-sonnet-4-5-20250929"   # 或 claude-opus-4-5 / claude-haiku-4-5
+model: "claude-sonnet-4-5-20250929"
 temperature: 0.7
 max_tokens: 8192
+reasoning: false
 
-# ── DeepSeek（OpenAI 兼容接口）────────────────────────────────
+# ── DeepSeek reasoner（原生推理模型，R1 思考模式）──────────────
 # provider: "openai"
 # api_key: "sk-xxx"
 # base_url: "https://api.deepseek.com/v1"
-# model: "deepseek-reasoner"   # 思考模式（R1），搭配 pipeline.yaml reasoning: true
-#                              # deepseek-chat 为非思考模式，用 reasoning: false
+# model: "deepseek-reasoner"
 # temperature: 0.7
 # max_tokens: 8192
+# reasoning: true    ← 原生推理模型才能开 true
 
-# ── OpenAI ────────────────────────────────────────────────────
+# ── 普通 OpenAI 兼容（qwen / gpt-4o / deepseek-chat 等）───────
 # provider: "openai"
 # api_key: "sk-xxx"
-# base_url: "https://api.openai.com/v1"
-# model: "gpt-4o"
+# base_url: "https://your-endpoint/v1"
+# model: "qwen3.5-27b"
 # temperature: 0.7
-# max_tokens: 4096
+# max_tokens: 8192
+# reasoning: false   ← 普通模型必须 false，否则 Agno 发 role=developer 报 400
