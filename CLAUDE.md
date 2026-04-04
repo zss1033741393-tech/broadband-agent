@@ -2,116 +2,121 @@
 
 ## 项目概述
 
-家宽体验感知优化 Agent 智能体原型。通过 Agno 框架构建 Skills 驱动的 Agent，实现用户意图到设备配置的端到端自动化生成。
+家宽体验感知优化 Agent。Agno 原生 Skills + Knowledge + Guardrails + AgentOS + Structured Output + Streaming。
 
-核心架构：**Agent 自主决策 + Skills 渐进式加载**。Agent 根据用户输入和上下文自主选择调用哪个 Skill，system prompt 只提供流程指导（建议顺序），不做硬编排。
+核心模式：**运行时 Skill 发现 → 渐进式加载 → 自主链路决策**。
 
 ## 技术栈
 
-- Python 3.11+
-- Agno（Agent 框架，原生 Skills 支持）
-- FastAPI（后端）
-- Gradio（对话调试界面）
-- SQLite（会话/配置持久化）
-- LLM：OpenAI API 兼容格式（可对接内部开源模型）
+Python 3.11+, Agno, Gradio, SQLite, LanceDB
+
+## Agno 能力使用
+
+| 能力 | 用法 |
+|------|------|
+| Skills | 自动扫描 skills/ 发现，元工具 list/get/run |
+| Agent Loop | max_turns=15 自主循环 |
+| Structured Output | response_model=Pydantic 强制格式 |
+| Streaming | run_stream() 实时流到前端 |
+| Guardrails | PromptInjection 输入 + ConfigOutput 输出校验 |
+| Knowledge | LanceDB 向量存储，领域知识 RAG 检索 |
+| Memory | session 对话历史。跨会话记忆 P1，用户系统就绪后启用 |
+| AgentOS | 替代手写 FastAPI + Tracer，原生 API + trace + Web UI |
+| Tracing | debug_mode=True + AgentOS UI 可视化 |
 
 ## 项目结构
 
 ```
 broadband-agent/
-├── configs/                         # YAML 配置（含 API Key，不拆 .env）
-│   ├── llm.yaml                     # 模型注册
-│   ├── pipeline.yaml                # 运行参数
-│   └── logging.yaml                 # 日志配置
-├── app/                             # FastAPI 后端
-│   ├── main.py                      # 入口 + Gradio 挂载
-│   ├── config.py                    # 配置加载
-│   ├── agent/                       # Agent 核心
-│   │   ├── agent.py                 # Agno Agent 定义 + system prompt
-│   │   ├── skill_loader.py          # Skills 发现与注册
-│   │   └── tracer.py                # Agent 轨迹记录
-│   ├── models/                      # Pydantic 数据模型
-│   ├── db/                          # SQLite
-│   ├── logger/                      # 日志模块
-│   └── api/                         # FastAPI 路由
-├── skills/                          # 自包含 Skills（核心，详见下方）
-├── ui/                              # Gradio 界面
-│   └── chat_ui.py
-├── traces/                          # Agent 轨迹（按 session_id 隔离）
+├── configs/
+│   ├── llm.yaml              # 模型注册（含 api_key）
+│   ├── pipeline.yaml         # 运行参数
+│   └── logging.yaml
+├── app/
+│   ├── main.py               # AgentOS 入口 + Gradio 挂载
+│   ├── config.py             # YAML 加载
+│   ├── agent/
+│   │   └── agent.py          # Agent 定义（全部 Agno 能力集成）
+│   ├── models/               # Pydantic 结构化输出
+│   │   ├── intent.py         # IntentGoal
+│   │   ├── plan.py           # PlanResult
+│   │   ├── constraint.py     # ConstraintResult
+│   │   └── config.py         # ConfigOutput
+│   ├── guardrails.py         # 自定义输出护栏
+│   ├── db/
+│   └── logger/
+├── skills/                   # 自包含 Skills（自动扫描）
+│   ├── intent_parser/        # SKILL.md + scripts/
+│   ├── user_profiler/        # SKILL.md + scripts/ + references/
+│   ├── plan_generator/       # SKILL.md + scripts/ + references/(5模板)
+│   ├── constraint_checker/   # SKILL.md + scripts/ + references/(规则)
+│   ├── config_translator/    # SKILL.md + scripts/ + references/(schema)
+│   └── domain_expert/        # SKILL.md + references/(知识→灌入Knowledge)
+├── ui/chat_ui.py             # Gradio 调试界面
+├── data/
+│   ├── agent.db              # SQLite
+│   └── lancedb/              # Knowledge 向量存储
 ├── logs/
-└── outputs/
+└── tests/
 ```
 
-## Skills 架构（最重要）
+## Agent 核心代码
 
-每个 Skill 是自包含的能力包，与模型无关：
+```python
+from agno.agent import Agent
+from agno.models.openai import OpenAIChat
+from agno.skills import Skills, LocalSkills
+from agno.memory import Memory
+from agno.knowledge import Knowledge
+from agno.vectordb.lancedb import LanceDb
+from agno.storage.agent.sqlite import SqliteAgentStorage
+from agno.guardrails import PromptInjectionGuardrail
+from agno.os import AgentOS
+from app.config import load_config
+from pathlib import Path
 
-```
-skills/{skill_name}/
-├── SKILL.md              # frontmatter(name + description) + 何时使用 + 处理步骤 + 规则
-├── scripts/              # Python 执行脚本
-│   └── handler.py
-└── references/           # JSON 模板、规则文档、示例
-    └── template.json
-```
+cfg = load_config()  # 全部从 configs/*.yaml 加载，零硬编码
 
-关键原则：
-- **Skill 内聚**：模板在 `references/`，脚本在 `scripts/`，不放外部目录
-- **Skill 与模型无关**：SKILL.md 里只有 name + description，不声明模型
-- **模型是 Agent 级配置**：在 `configs/llm.yaml` 注册，创建 Agent 时绑定
-- **新增 Skill**：只需在 `skills/` 下新建目录 + SKILL.md，不改任何配置文件
+def discover_skills(skills_dir: Path) -> Skills:
+    loaders = []
+    for child in sorted(skills_dir.iterdir()):
+        if child.is_dir() and (child / "SKILL.md").exists():
+            loaders.append(LocalSkills(str(child)))
+    return Skills(loaders=loaders)
 
-现有 6 个 Skills：
-- `intent_parsing` — 意图解析与追问
-- `user_profile` — 用户画像补全
-- `plan_filling` — 五大方案模板填充（模板在 references/ 内）
-- `constraint_check` — 约束校验（性能/组网/冲突）
-- `config_translation` — NL2JSON 配置转译
-- `domain_knowledge` — 领域知识（仅参考资料，无脚本）
+agent = Agent(
+    model=OpenAIChat(id=cfg.llm.model, api_key=cfg.llm.api_key, base_url=cfg.llm.base_url),
+    skills=discover_skills(Path(cfg.pipeline.skills_dir)),
+    knowledge=Knowledge(vector_db=LanceDb(table_name=cfg.storage.lancedb_table, uri=cfg.storage.lancedb_uri)),
+    instructions=SYSTEM_PROMPT,
+    memory=Memory(),
+    add_history_to_context=True,
+    num_history_runs=cfg.pipeline.num_history_runs,
+    # enable_memories=True,          # P1: 用户系统就绪后启用
+    storage=SqliteAgentStorage(table_name=cfg.storage.sqlite_table, db_file=cfg.storage.sqlite_db_path),
+    pre_hooks=[PromptInjectionGuardrail()],
+    max_turns=cfg.pipeline.max_turns,
+    reasoning=cfg.pipeline.reasoning,
+    debug_mode=cfg.pipeline.debug_mode,
+)
 
-## Agent Trace 轨迹
-
-每次会话保存到 `traces/{session_id}/`：
-- `trace.jsonl` — 每步一行 JSON（user_input / agent_thinking / skill_load / skill_execute / agent_output）
-- `artifacts/` — 各阶段输出物（intent_goal.json / plans/*.json / constraint_result.json / configs/*.json）
-- `conversation.json` — 完整对话记录
-
-## 常用命令
-
-```bash
-# 安装依赖
-pip install agno fastapi uvicorn gradio pydantic openai pyyaml aiosqlite ruff
-
-# 启动服务
-uvicorn app.main:app --reload --port 8000
-
-# 代码格式化
-ruff check --fix .
-ruff format .
-
-# 运行测试
-pytest tests/
+agent_os = AgentOS(agents=[agent], tracing=True)
+app = agent_os.get_app()
 ```
 
-## 代码规范
+## 关键设计决策
 
-- 遵循 PEP8，使用 `async/await`，类型注解可选但建议
-- 所有函数必须有类型标注
-- 使用 Pydantic Model 做数据校验
-- 文件名 `snake_case.py`，类名 `PascalCase`，Skill 目录名 `snake_case`
-- Skill 的 SKILL.md 必须有 frontmatter（name + description）
-- 关键决策逻辑写中文注释，脚本函数写 docstring
-- 使用 `ruff` 格式化
-
-## 日志规范
-
-日志标签格式 `[Skill:xxx]`：
-
-```
-[2026-04-03 14:23:01] [Skill:intent_parsing] [INFO] Agent 加载 Skill
-[2026-04-03 14:23:02] [Skill:intent_parsing] [DEBUG] LLM 调用 | model=gpt-4o | tokens_in=520
-[2026-04-03 14:23:15] [Skill:constraint_check] [WARN] 校验失败 | conflict="节能时段与保障时段冲突"
-```
+1. **Skills 自动扫描**：扫描 skills/ 下所有含 SKILL.md 的子目录，不硬编码路径
+2. **Agent 自主决策**：不编排 Pipeline，system prompt 只提供流程指导
+3. **Skill 自包含**：模板、脚本、参考资料都在 Skill 内部
+4. **Skill 与模型解耦**：模型在 Agent 级注册，SKILL.md 不声明模型
+5. **Structured Output**：Skill 输出用 Pydantic response_model 强制约束
+6. **Streaming**：run_stream() 流式输出，思考过程实时可见
+7. **Guardrails**：输入防注入 + 输出 schema 校验
+8. **Knowledge RAG**：领域知识灌入 LanceDB，语义检索替代文件读取
+9. **User Memory**：P1，用户系统就绪后启用 enable_memories
+10. **AgentOS**：替代手写 FastAPI/Tracer，原生 API + trace + Web UI
+11. **所有配置在 YAML**：configs/llm.yaml 含 api_key，没有 .env
 
 ## Commit 规范
 
@@ -122,6 +127,7 @@ refactor: 重构
 docs: 文档
 skill: Skills 变更（SKILL.md / scripts / references）
 ```
+
 - **push 规则（重要）**：
   - 必须使用 `git push -u origin <branch>` 通过 PAT URL 直接推送
   - **严禁使用 GitHub MCP Server 工具（mcp__github__push_files 等）提交代码**，速度极慢
@@ -129,21 +135,30 @@ skill: Skills 变更（SKILL.md / scripts / references）
   - 推送后执行 `git fetch origin <branch>:refs/remotes/origin/<branch>` 同步本地跟踪引用，避免 stop-hook 误报
 - 禁止 --force 到 main/master
 
-## 关键设计决策
+## 常用命令
 
-1. **不是 Pipeline 编排**：Agent 自主决策调用哪个 Skill，system prompt 只提供流程指导
-2. **Skill 自包含**：模板、脚本、参考资料都在 Skill 目录内，不放外部
-3. **Skill 与模型解耦**：Skill 不声明模型需求，模型在 Agent 级别注册
-4. **所有配置在 YAML**：`configs/llm.yaml` 包含 API Key，没有 `.env` 文件
-5. **Agent Trace**：每次会话完整轨迹保存，包含思考过程、Skill 调用、输出物
-6. **Gradio 三栏布局**：左边对话（含思考过程折叠）、右上输出物面板、右下 Trace 面板
+```bash
+pip install "agno[openai,lancedb]" gradio pyyaml ruff
+uvicorn app.main:app --reload --port 8000
+# AgentOS UI: http://localhost:8000
+# Gradio 调试: http://localhost:8000/gradio
+pytest tests/ -v
+ruff check --fix . && ruff format .
+```
 
 ## 注意事项
 
-- 详细设计见 `design.md`（**设计文档只在本地维护，禁止提交到 git**）
+- 详细设计见 design.md（**设计文档只在本地维护，禁止提交到 git**）
 - **禁止将 `design.md` 或任何设计/原型文档提交到版本库**，此类文档仅供本地参考
-- 不要在 Skill 外部建 `tools/` 或 `templates/` 目录
-- 不要在 SKILL.md 里加 model_tier 或任何模型相关字段
-- plan_filling 的 5 个模板可并行填充（asyncio.gather）
-- 约束校验失败时 Agent 自主决策回退，不是硬编码循环
-- config_translation 是独立 Agent 子任务（NL2JSON/NL2DSL）
+- **零硬编码**：所有配置从 configs/*.yaml 读取，通过 `load_config()` 统一加载
+- **追问交互**：intent_parser 返回 needs_clarification=true 时 Agent 必须暂停追问用户，不猜测
+- **画像补全**：user_profiler 返回 has_complete_profile=false 时，能推断的补全、关键字段追问、非关键用默认值
+- **memory 优先**：用户历史画像中已有的字段不追问，直接使用
+- **约束校验警告**：severity=warning 必须告知用户并等待确认
+- 不要建 app/tools/ 或顶层 templates/ 目录
+- 不要写 skill_loader.py 或 tracer.py，Agno 原生处理
+- 不要在 SKILL.md 里加模型相关字段
+- SKILL.md 的 description 要精准（Agent 靠它决定是否加载）
+- SKILL.md 的"后续建议"引导 Agent 决策链路
+- constraint_checker 是强制步骤，system prompt 中明确标注
+- domain_expert 的文本类知识灌入 Knowledge，结构化数据留 references/
