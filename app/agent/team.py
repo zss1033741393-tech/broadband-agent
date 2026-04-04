@@ -132,7 +132,7 @@ def build_team() -> Team:
     )
 
     return Team(
-        name="宽带优化团队",
+        name="家宽CEI体验优化团队",
         members=[intent_agent, plan_agent, constraint_agent, config_agent],
         mode=TeamMode.coordinate,
         model=orchestrator_model,
