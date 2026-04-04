@@ -6,11 +6,16 @@
   💬 回答  — 最终模型回复
 
 独立启动：python ui/chat_ui.py（监听 7860 端口，与 AgentOS 进程分离）
+
+流式实现说明：
+  使用 async def + agent.arun(stream=True) 的异步生成器，
+  Gradio 原生异步迭代，每个事件直接推送到浏览器，无线程切换开销。
+  同步 agent.run + anyio.to_thread 包装会引入跨线程 yield 延迟（卡顿感）。
 """
 from __future__ import annotations
 
 import json
-from typing import Any, Iterator
+from typing import Any, AsyncIterator
 
 import gradio as gr
 
@@ -161,18 +166,19 @@ def _format_result(result: Any) -> str:
 # 流式对话核心 — 供 Gradio ChatInterface 调用
 # ─────────────────────────────────────────────────────────────
 
-def _stream_chat(message: str, history: list) -> Iterator[str]:
-    """结构化活动日志生成器
+async def _stream_chat(message: str, history: list) -> AsyncIterator[str]:
+    """结构化活动日志异步生成器
 
-    每个事件更新对应区块并 yield 完整日志字符串（Gradio 要求累积而非 delta）。
-    使用 break 而非 return 退出，避免 Gradio 异步包装层的 StopAsyncIteration。
+    使用 agent.arun(stream=True) 返回的原生异步迭代器，
+    Gradio 直接 async for 消费，每个事件实时推送到浏览器，
+    不经过 anyio.to_thread 线程包装，消除同步生成器的跨线程 yield 延迟。
     """
     agent = get_agent()
     log = _ActivityLog()
     has_yielded = False
 
     try:
-        for event in agent.run(message, stream=True):
+        async for event in await agent.arun(message, stream=True):
             event_type = getattr(event, "event", None)
             tool = getattr(event, "tool", None)
 
@@ -215,7 +221,7 @@ def _stream_chat(message: str, history: list) -> Iterator[str]:
                 log.on_error(str(error_msg))
                 has_yielded = True
                 yield log.render()
-                break
+                return
 
     except Exception as exc:
         log.on_error(str(exc))
