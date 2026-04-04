@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """用户画像查询与补全脚本"""
 import json
 from pathlib import Path

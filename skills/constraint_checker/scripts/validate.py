@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """约束校验脚本 — 性能/组网/冲突三类校验"""
 import json
 from pathlib import Path

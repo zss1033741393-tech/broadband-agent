@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """意图解析核心脚本"""
 import json
 from pathlib import Path

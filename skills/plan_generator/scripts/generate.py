@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """方案模板填充脚本"""
 import asyncio
 import json
