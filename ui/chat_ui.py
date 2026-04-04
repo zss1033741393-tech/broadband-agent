@@ -1,15 +1,16 @@
-"""Gradio 调试界面 — 流式对话
+"""Gradio 调试界面 — 结构化活动日志
 
-通过 Agno agent.run(stream=True) 实现实时流式输出：
-- 模型 native thinking（如 qwen3 <think> 块）在思考折叠区实时呈现
-- 每次工具调用（Skill）立即显示进度提示，不再盲等
-- 最终回答逐字流出
+每轮对话以分区块的活动日志呈现：
+  💭 思考  — 模型 native thinking（qwen3 <think> 块）实时流出
+  🔧 工具  — 每次工具调用：工具名 + 参数（调用中 / 返回内容 / 错误）
+  💬 回答  — 最终模型回复
 
 独立启动：python ui/chat_ui.py（监听 7860 端口，与 AgentOS 进程分离）
 """
 from __future__ import annotations
 
-from typing import Iterator
+import json
+from typing import Any, Iterator
 
 import gradio as gr
 
@@ -21,25 +22,147 @@ setup_logging()
 
 
 # ─────────────────────────────────────────────────────────────
-# 渲染辅助 — 将思考、工具状态、答案合并为展示字符串
+# 活动日志数据结构
 # ─────────────────────────────────────────────────────────────
 
-def _render(thinking: str, tool_hint: str, answer: str) -> str:
-    """拼接最终展示内容：思考（blockquote）+ 工具状态 + 答案"""
-    parts: list[str] = []
+class _Section:
+    """日志中的一个显示块"""
+    __slots__ = ("kind", "lines", "closed")
 
-    if thinking:
-        # 每行加 "> " 使其在 Markdown 里渲染为引用块
-        quoted = "\n".join(f"> {line}" for line in thinking.splitlines())
-        parts.append(f"**💭 思考过程**\n\n{quoted}")
+    def __init__(self, kind: str, initial: str = ""):
+        self.kind: str = kind        # "thinking" | "tool" | "answer" | "error"
+        self.lines: list[str] = [initial] if initial else []
+        self.closed: bool = False
 
-    if tool_hint:
-        parts.append(tool_hint)
+    def append(self, text: str) -> None:
+        self.lines.append(text)
 
-    if answer:
-        parts.append(answer)
+    def extend_last(self, delta: str) -> None:
+        if self.lines:
+            self.lines[-1] += delta
+        else:
+            self.lines.append(delta)
 
-    return "\n\n".join(parts) if parts else ""
+    def text(self) -> str:
+        return "".join(self.lines)
+
+
+class _ActivityLog:
+    """维护本轮对话的结构化日志并生成 Markdown 渲染字符串"""
+
+    _SEP = "\n\n---\n\n"
+
+    def __init__(self) -> None:
+        self._sections: list[_Section] = []
+        self._tool_count = 0
+
+    # ── 事件处理 ──────────────────────────────────────────────
+
+    def on_thinking_delta(self, delta: str) -> None:
+        """qwen3 native thinking delta"""
+        sec = self._last("thinking")
+        if sec and not sec.closed:
+            sec.extend_last(delta)
+        else:
+            self._sections.append(_Section("thinking", delta))
+
+    def on_tool_start(self, name: str, args: dict[str, Any]) -> None:
+        self._tool_count += 1
+        header = f"**🔧 工具 #{self._tool_count}** `{name}`"
+        args_clean = {k: v for k, v in args.items() if k not in ("args", "kwargs")}
+        if args_clean:
+            args_str = json.dumps(args_clean, ensure_ascii=False)
+            # 参数超长截断
+            if len(args_str) > 300:
+                args_str = args_str[:297] + "…"
+            header += f"\n\n> 参数: `{args_str}`"
+        header += "\n\n*执行中…*"
+        sec = _Section("tool", header)
+        self._sections.append(sec)
+
+    def on_tool_complete(self, name: str, result: Any) -> None:
+        """找到最近一个未关闭的 tool section，替换"执行中"为返回内容"""
+        sec = self._last_open_tool()
+        if sec is None:
+            return
+        # 重建内容：去掉"执行中"那行，加上返回
+        lines = sec.text()
+        lines = lines.replace("\n\n*执行中…*", "")
+        result_str = _format_result(result)
+        lines += f"\n\n✅ **返回**\n\n```\n{result_str}\n```"
+        sec.lines = [lines]
+        sec.closed = True
+
+    def on_tool_error(self, name: str, error: str) -> None:
+        sec = self._last_open_tool()
+        if sec is None:
+            return
+        lines = sec.text().replace("\n\n*执行中…*", "")
+        lines += f"\n\n❌ **错误** `{error}`"
+        sec.lines = [lines]
+        sec.closed = True
+
+    def on_answer_delta(self, delta: str) -> None:
+        sec = self._last("answer")
+        if sec and not sec.closed:
+            sec.extend_last(delta)
+        else:
+            new_sec = _Section("answer")
+            new_sec.append(f"**💬 回答**\n\n{delta}")
+            self._sections.append(new_sec)
+
+    def on_error(self, msg: str) -> None:
+        self._sections.append(_Section("error", f"**❌ 错误** {msg}"))
+
+    # ── 渲染 ─────────────────────────────────────────────────
+
+    def render(self) -> str:
+        parts: list[str] = []
+        for sec in self._sections:
+            if sec.kind == "thinking":
+                raw = sec.text()
+                if raw.strip():
+                    # 每行加 > 前缀渲染为引用块
+                    quoted = "\n".join(
+                        f"> {line}" for line in raw.splitlines()
+                    )
+                    parts.append(f"**💭 思考**\n\n{quoted}")
+            else:
+                content = sec.text()
+                if content.strip():
+                    parts.append(content)
+        return self._SEP.join(parts) if parts else ""
+
+    # ── 内部工具 ─────────────────────────────────────────────
+
+    def _last(self, kind: str) -> "_Section | None":
+        for sec in reversed(self._sections):
+            if sec.kind == kind:
+                return sec
+        return None
+
+    def _last_open_tool(self) -> "_Section | None":
+        for sec in reversed(self._sections):
+            if sec.kind == "tool" and not sec.closed:
+                return sec
+        return None
+
+
+def _format_result(result: Any) -> str:
+    """将工具返回值格式化为可读字符串（超长截断）"""
+    if result is None:
+        return "(空)"
+    if isinstance(result, (dict, list)):
+        try:
+            s = json.dumps(result, ensure_ascii=False, indent=2)
+        except Exception:
+            s = str(result)
+    else:
+        s = str(result)
+    limit = 800
+    if len(s) > limit:
+        s = s[:limit] + f"\n… (共 {len(s)} 字符，已截断)"
+    return s
 
 
 # ─────────────────────────────────────────────────────────────
@@ -47,72 +170,71 @@ def _render(thinking: str, tool_hint: str, answer: str) -> str:
 # ─────────────────────────────────────────────────────────────
 
 def _stream_chat(message: str, history: list) -> Iterator[str]:
-    """流式对话生成器
+    """结构化活动日志生成器
 
-    事件处理策略：
-    - tool_call_started  → 立即显示"🔧 调用: tool_name…"（避免用户盲等）
-    - tool_call_completed→ 清除工具状态行，避免最终回复被旧状态污染
-    - run_content        → reasoning_content 追加思考区；content 追加答案区
-    - run_error          → 追加错误提示
-
-    注意：不使用 return 提前退出生成器（Gradio 异步包装层不兼容
-    generator 内部 StopIteration，会抛 RuntimeError）；改用 break + 标志位。
+    每个事件更新对应区块并 yield 完整日志字符串（Gradio 要求累积而非 delta）。
+    使用 break 而非 return 退出，避免 Gradio 异步包装层的 StopAsyncIteration。
     """
     agent = get_agent()
-    thinking = ""   # 模型 native thinking 累积（qwen3 reasoning_content）
-    tool_hint = ""  # 当前工具调用状态行（单行，调用完后清空）
-    answer = ""     # 最终回答累积
+    log = _ActivityLog()
     has_yielded = False
 
     try:
         for event in agent.run(message, stream=True):
             event_type = getattr(event, "event", None)
+            tool = getattr(event, "tool", None)
 
             if event_type == RunEvent.tool_call_started.value:
-                tool = getattr(event, "tool", None)
-                name = getattr(tool, "tool_name", "工具") if tool else "工具"
-                tool_hint = f"> 🔧 调用: `{name}`…"
+                name = getattr(tool, "tool_name", "?") if tool else "?"
+                args = getattr(tool, "tool_args", {}) or {}
+                log.on_tool_start(name, args)
                 has_yielded = True
-                yield _render(thinking, tool_hint, answer)
+                yield log.render()
 
             elif event_type == RunEvent.tool_call_completed.value:
-                tool_hint = ""   # 工具完成，清除进度行
+                name = getattr(tool, "tool_name", "?") if tool else "?"
+                result = getattr(tool, "result", None)
+                log.on_tool_complete(name, result)
                 has_yielded = True
-                yield _render(thinking, tool_hint, answer)
+                yield log.render()
+
+            elif event_type == RunEvent.tool_call_error.value:
+                name = getattr(tool, "tool_name", "?") if tool else "?"
+                error = getattr(tool, "tool_call_error", "未知错误") or "未知错误"
+                log.on_tool_error(name, str(error))
+                has_yielded = True
+                yield log.render()
 
             elif event_type == RunEvent.run_content.value:
-                # qwen3 等原生推理模型的 thinking 块（Agno 已解析为 reasoning_content）
-                reasoning_delta = getattr(event, "reasoning_content", None)
-                if reasoning_delta:
-                    thinking += reasoning_delta
+                reasoning = getattr(event, "reasoning_content", None)
+                if reasoning:
+                    log.on_thinking_delta(reasoning)
 
-                content_delta = getattr(event, "content", None)
-                if content_delta:
-                    answer += content_delta
+                content = getattr(event, "content", None)
+                if content:
+                    log.on_answer_delta(content)
 
-                if reasoning_delta or content_delta:
+                if reasoning or content:
                     has_yielded = True
-                    yield _render(thinking, tool_hint, answer)
+                    yield log.render()
 
             elif event_type == RunEvent.run_error.value:
                 error_msg = getattr(event, "error", "未知错误")
-                answer += f"\n\n**[Agent 错误]** {error_msg}"
+                log.on_error(str(error_msg))
                 has_yielded = True
-                yield _render(thinking, tool_hint, answer)
-                break   # 出错后停止迭代，不使用 return（避免异步上下文 StopAsyncIteration）
+                yield log.render()
+                break
 
     except Exception as exc:
-        answer += f"\n\n**[系统错误]** {exc}"
+        log.on_error(str(exc))
         has_yielded = True
-        yield _render(thinking, tool_hint, answer)
+        yield log.render()
 
-    # 兜底：若 Agent 全程无任何输出（如 reasoning=True 解析失败）确保至少 yield 一次
     if not has_yielded:
         yield (
             "**[提示]** Agent 未返回任何内容。\n\n"
-            "常见原因：`configs/llm.yaml` 中 `reasoning: true` 设置了 Agno 推理链，"
-            "但当前模型（如 qwen3）不支持该模式。\n\n"
-            "请将 `reasoning` 改为 `false`，仅 deepseek-reasoner / OpenAI o1/o3 才需要 true。"
+            "常见原因：`configs/llm.yaml` 中 `reasoning: true` 对当前模型无效。\n"
+            "qwen3 / 普通 OpenAI 兼容模型请设置 `reasoning: false`。"
         )
 
 
@@ -121,13 +243,12 @@ def _stream_chat(message: str, history: list) -> Iterator[str]:
 # ─────────────────────────────────────────────────────────────
 
 def create_ui() -> gr.ChatInterface:
-    """创建 Gradio ChatInterface（流式）"""
     return gr.ChatInterface(
         fn=_stream_chat,
         title="家宽体验感知优化 Agent — 调试界面",
         description=(
-            "与 Agent 对话，测试意图解析、追问、方案填充、约束校验全链路。\n"
-            "Agent 调用 Skill 时界面实时显示进度，无需等待全部完成。"
+            "结构化活动日志：💭 思考 → 🔧 工具调用（参数+返回）→ 💬 最终回答\n"
+            "可清晰看到 Agent 走了哪个流程、调了哪些 Skill、每步返回了什么。"
         ),
         examples=[
             "我是直播用户，晚上 8 点到 12 点需要保障上行带宽，对卡顿比较敏感",
