@@ -20,19 +20,21 @@ description: >
 get_skill_instructions("constraint_checker")
 ```
 
-**第二步**：执行约束校验脚本
+**第二步**：获取产出文件路径，再执行约束校验脚本
 
 ```
+# 先获取上两阶段产出文件路径（避免内联完整 JSON 浪费 token）
+get_pipeline_file("plans")    # → "outputs/<sid>/plans.json"
+get_pipeline_file("intent")   # → "outputs/<sid>/intent.json"
+
 get_skill_script(
     "constraint_checker",
     "validate.py",
     execute=True,
-    args=['<plans_json>', '<intent_goal_json>']
+    args=["--plans-file", "outputs/<sid>/plans.json",
+          "--intent-file", "outputs/<sid>/intent.json"]
 )
 ```
-
-- `plans_json`：plan_generator 返回的 `plans` 数组转成 dict（key 为 template 文件名）
-- `intent_goal_json`：完整的 IntentGoal JSON（含 guarantee_period 等字段）
 
 **脚本输出格式（stdout JSON）**：
 

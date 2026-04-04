@@ -23,14 +23,17 @@ get_skill_instructions("plan_generator")
 get_skill_reference("plan_generator", "filling_rules.md")
 ```
 
-**第二步**：执行方案填充脚本（内部并行处理 5 个模板）
+**第二步**：获取意图产出文件路径，再执行方案填充脚本
 
 ```
+# 先获取上一阶段产出文件路径（避免内联完整 JSON 浪费 token）
+get_pipeline_file("intent")   # → "outputs/<sid>/intent.json"
+
 get_skill_script(
     "plan_generator",
     "generate.py",
     execute=True,
-    args=['<intent_goal_json>']   # 完整的 IntentGoal JSON
+    args=["--intent-file", "outputs/<sid>/intent.json"]
 )
 ```
 

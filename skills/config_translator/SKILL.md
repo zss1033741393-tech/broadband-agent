@@ -21,18 +21,20 @@ get_skill_instructions("config_translator")
 get_skill_reference("config_translator", "field_mapping.md")
 ```
 
-**第二步**：执行转译脚本
+**第二步**：获取方案产出文件路径，再执行转译脚本
 
 ```
+# 先获取上一阶段产出文件路径（避免内联完整 JSON 浪费 token）
+get_pipeline_file("plans")    # → "outputs/<sid>/plans.json"
+
 get_skill_script(
     "config_translator",
     "translate.py",
     execute=True,
-    args=['<plans_json>', '<device_id>']   # device_id 可选，默认为空
+    args=["--plans-file", "outputs/<sid>/plans.json"]
+    # device_id 可选，追加 "--device-id", "<id>"
 )
 ```
-
-- `plans_json`：plan_generator 返回的 plans dict（key 为 template 文件名）
 
 **脚本输出格式（stdout JSON）**：
 

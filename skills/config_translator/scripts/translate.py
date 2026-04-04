@@ -140,15 +140,36 @@ def load_config_schema() -> dict[str, Any]:
 if __name__ == "__main__":
     """CLI 入口 — 供 get_skill_script(execute=True) 调用
 
-    用法:
+    用法（推荐，节省 token）：
+        python translate.py --plans-file outputs/<sid>/plans.json [--device-id <id>]
+
+    向后兼容用法：
         python translate.py '<plans_json>' ['<device_id>']
 
     输出: JSON 字符串，含 configs / success / failed_fields / schema
     """
     import sys
 
-    plans_json = sys.argv[1] if len(sys.argv) > 1 else "{}"
-    device_id = sys.argv[2] if len(sys.argv) > 2 else ""
+    def _read_arg(flag: str, argv_pos: int, default: str = "") -> str:
+        """先找 --flag <path>（读文件），降级到 sys.argv[pos] 内联字符串。"""
+        argv = sys.argv[1:]
+        if flag in argv:
+            idx = argv.index(flag) + 1
+            if idx < len(argv):
+                return Path(argv[idx]).read_text(encoding="utf-8")
+        return argv[argv_pos] if len(argv) > argv_pos else default
+
+    def _read_value(flag: str, argv_pos: int, default: str = "") -> str:
+        """读取普通值参数（不读文件）。"""
+        argv = sys.argv[1:]
+        if flag in argv:
+            idx = argv.index(flag) + 1
+            if idx < len(argv):
+                return argv[idx]
+        return argv[argv_pos] if len(argv) > argv_pos else default
+
+    plans_json = _read_arg("--plans-file", 0, default="{}")
+    device_id = _read_value("--device-id", 1, default="")
 
     try:
         plans = json.loads(plans_json)

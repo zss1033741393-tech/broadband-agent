@@ -37,6 +37,14 @@ _SCRIPT_TO_STAGE: dict[str, str] = {
 
 _OUTPUTS_ROOT = Path("outputs")
 
+# 当前活跃会话 ID（由 output_sink_hook 在首次工具调用时更新）
+_current_session_id: str | None = None
+
+
+def get_current_session_id() -> str | None:
+    """返回当前活跃会话 ID，供 get_pipeline_file 工具读取。"""
+    return _current_session_id
+
 
 def _resolve_session_dir(session_id: str | None) -> Path:
     sid = session_id or "unknown"
@@ -97,6 +105,9 @@ def output_sink_hook(
         return result
 
     session_id = getattr(run_context, "session_id", None) if run_context else None
+    if session_id:
+        global _current_session_id
+        _current_session_id = session_id
     session_dir = _resolve_session_dir(session_id)
     output_file = session_dir / f"{stage}.json"
 

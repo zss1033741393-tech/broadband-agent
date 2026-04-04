@@ -25,7 +25,7 @@ from agno.vectordb.lancedb import LanceDb
 from app.config import LLMConfig
 
 from app.config import load_config
-from app.outputs.sink import output_sink_hook
+from app.outputs.sink import get_current_session_id, output_sink_hook
 
 logger = logging.getLogger("agent")
 
@@ -155,12 +155,62 @@ SYSTEM_PROMPT = """\
 - 加载配置转译 Skill，将方案转为设备下发格式
 - 展示配置摘要、回退方案、注意事项
 
+## 阶段间数据传递（节省 Token，必须遵守）
+
+每个阶段脚本执行后，产出自动保存到 outputs/ 目录。
+**后续阶段禁止将完整 JSON 内联在 args 中**——改用 `get_pipeline_file(stage)` 获取文件路径，
+再通过 `--xxx-file <path>` 参数传给脚本，脚本直接从磁盘读取。
+
+stage 名称对应关系：
+- `intent`      ← extract.py 产出
+- `profile`     ← query_profile.py 产出
+- `plans`       ← generate.py 产出
+- `constraint`  ← validate.py 产出
+
+调用示例：
+```
+# 错误示范（浪费 3000+ token）：
+get_skill_script("config_translator", "translate.py", execute=True,
+                 args=['{"cei_perception": {...全量JSON...}}'])
+
+# 正确方式（文件路径只有几十字符）：
+get_pipeline_file("plans")          # → "outputs/abc123/plans.json"
+get_skill_script("config_translator", "translate.py", execute=True,
+                 args=["--plans-file", "outputs/abc123/plans.json"])
+```
+
 ## 通用规则
 - 单轮使用一个 Skill，通过对话历史追踪已完成的步骤
 - Skill 返回错误时主动向用户说明，不猜测
 - 如需领域知识（CEI 指标、设备能力、术语），使用 knowledge 检索
 - 用户意图明确且参数完整时，可跳过追问直接执行
 """
+
+
+# ─────────────────────────────────────────────────────────────
+# 管道文件工具 — 供模型获取上一阶段产出路径，避免内联 JSON
+# ─────────────────────────────────────────────────────────────
+
+def get_pipeline_file(stage: str) -> str:
+    """获取本会话某阶段产出文件的路径。
+
+    stage 可选值：intent / profile / plans / constraint / configs
+
+    在调用下一阶段脚本前，先调用此工具获取上一阶段产出路径，
+    再以 --xxx-file <path> 参数传给脚本，脚本从磁盘读取，
+    避免将完整 JSON 内联到 args 中浪费 token。
+
+    Returns:
+        文件路径字符串（如 "outputs/abc123/plans.json"）
+        或包含 error 字段的 JSON 字符串（文件不存在时）
+    """
+    sid = get_current_session_id()
+    if not sid:
+        return '{"error": "当前会话无阶段产出，请先执行对应阶段脚本"}'
+    path = Path(f"outputs/{sid}/{stage}.json")
+    if not path.exists():
+        return f'{{"error": "文件不存在: {path}，请先执行上一阶段脚本"}}'
+    return str(path)
 
 
 # ─────────────────────────────────────────────────────────────
@@ -207,6 +257,7 @@ def build_agent() -> Agent:
     return Agent(
         model=model,
         skills=skills,
+        tools=[get_pipeline_file],
         knowledge=knowledge,
         instructions=SYSTEM_PROMPT,
 
