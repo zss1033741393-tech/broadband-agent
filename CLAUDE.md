@@ -178,13 +178,14 @@ README 不需要因为 bug fix、测试补充、注释修改而更新。
 ## 常用命令
 
 ```bash
-pip install "agno[openai,lancedb]" gradio pyyaml ruff
-uvicorn app.main:app --reload --port 8000
-# AgentOS UI: http://localhost:8000
-# Gradio 调试: http://localhost:8000/gradio
+pip install -r requirements.txt
+uvicorn app.main:app --reload --port 8000   # AgentOS API: http://localhost:8000
+python ui/chat_ui.py                        # Gradio 调试: http://localhost:7860（独立进程）
 pytest tests/ -v
 ruff check --fix . && ruff format .
 ```
+
+> Gradio 不挂载到 AgentOS，原因：AgentOS TrailingSlashMiddleware 与 Gradio 路由冲突导致 307 死循环。
 
 ## 开发纪律（血泪教训）
 

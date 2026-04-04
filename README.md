@@ -105,6 +105,7 @@ max_tokens: 4096
 
 ### 3. 启动服务
 
+**AgentOS 主服务**（API + 会话持久化）：
 ```bash
 uvicorn app.main:app --reload --port 8000
 ```
@@ -113,7 +114,17 @@ uvicorn app.main:app --reload --port 8000
 |------|------|
 | http://localhost:8000/ | AgentOS API 信息（JSON） |
 | http://localhost:8000/docs | Swagger API 文档 |
-| http://localhost:8000/gradio | Gradio 对话调试界面 |
+
+**Gradio 调试界面**（独立进程，另开终端）：
+```bash
+python ui/chat_ui.py
+```
+
+| 端点 | 说明 |
+|------|------|
+| http://localhost:7860 | Gradio 对话调试界面 |
+
+> Gradio 独立运行而非挂载到 AgentOS，原因：AgentOS 内置 TrailingSlashMiddleware 与 Gradio 路由存在重定向冲突。
 
 ### 4. 运行测试
 
