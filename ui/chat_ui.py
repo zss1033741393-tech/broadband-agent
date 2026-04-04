@@ -71,11 +71,8 @@ class _ActivityLog:
         header = f"**🔧 工具 #{self._tool_count}** `{name}`"
         args_clean = {k: v for k, v in args.items() if k not in ("args", "kwargs")}
         if args_clean:
-            args_str = json.dumps(args_clean, ensure_ascii=False)
-            # 参数超长截断
-            if len(args_str) > 300:
-                args_str = args_str[:297] + "…"
-            header += f"\n\n> 参数: `{args_str}`"
+            args_str = json.dumps(args_clean, ensure_ascii=False, indent=2)
+            header += f"\n\n```json\n{args_str}\n```"
         header += "\n\n*执行中…*"
         sec = _Section("tool", header)
         self._sections.append(sec)
@@ -149,20 +146,15 @@ class _ActivityLog:
 
 
 def _format_result(result: Any) -> str:
-    """将工具返回值格式化为可读字符串（超长截断）"""
+    """将工具返回值格式化为可读字符串"""
     if result is None:
         return "(空)"
     if isinstance(result, (dict, list)):
         try:
-            s = json.dumps(result, ensure_ascii=False, indent=2)
+            return json.dumps(result, ensure_ascii=False, indent=2)
         except Exception:
-            s = str(result)
-    else:
-        s = str(result)
-    limit = 800
-    if len(s) > limit:
-        s = s[:limit] + f"\n… (共 {len(s)} 字符，已截断)"
-    return s
+            return str(result)
+    return str(result)
 
 
 # ─────────────────────────────────────────────────────────────
