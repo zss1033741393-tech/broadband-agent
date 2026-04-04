@@ -12,8 +12,11 @@
 """
 from __future__ import annotations
 
+import importlib.util
+import json
 import logging
 from pathlib import Path
+from typing import Any
 
 from agno.agent import Agent
 from agno.db.sqlite import SqliteDb
@@ -129,30 +132,77 @@ SYSTEM_PROMPT = """\
 
 **重要**：先调用 `get_skill_instructions` 理解 Skill 的输入输出格式，再执行脚本。
 
-## 决策流程
+## 参考资料调用说明（避免无效调用）
+
+以下 reference 文件由脚本**自动从磁盘加载**，**不需要**提前调用 `get_skill_reference` 读取：
+- `filling_rules.md` — generate.py 内部规则已硬编码，不读取此文件
+- `field_mapping.md` — translate.py 内部 FIELD_MAPPINGS 已硬编码，不读取此文件
+- `performance_rules.json` — validate.py 通过 `_load_rules()` 自动读取
+- `conflict_matrix.json` — validate.py 通过 `_load_rules()` 自动读取
+- `config_schema.json` — translate.py 通过 `load_config_schema()` 自动读取
+
+`intent_schema.json` 的内容已内嵌在下方"IntentGoal 字段结构"章节，无需单独调用。
+
+## IntentGoal 字段结构（intent_schema.json）
+
+```json
+{
+  "intent_goal": {
+    "user_type": { "type": "string", "examples": ["直播用户", "游戏用户", "办公用户", "视频用户"] },
+    "scenario": { "type": "string", "examples": ["上行带宽保障", "低延迟保障", "稳定性保障"] },
+    "guarantee_period": {
+      "start_time": { "type": "string", "format": "HH:MM" },
+      "end_time": { "type": "string", "format": "HH:MM" },
+      "is_periodic": { "type": "boolean", "default": false }
+    },
+    "guarantee_target": {
+      "priority_level": { "type": "string", "enum": ["high", "medium", "low"] },
+      "sensitivity": { "type": "string", "description": "用户敏感点，如卡顿/延迟/断线" },
+      "key_applications": { "type": "array", "items": "string", "examples": ["OBS", "抖音直播", "钉钉"] }
+    },
+    "core_metrics": {
+      "latency_sensitive": { "type": "boolean", "default": false },
+      "bandwidth_priority": { "type": "boolean", "default": false },
+      "stability_priority": { "type": "boolean", "default": false }
+    },
+    "resolution_requirement": { "type": "string", "examples": ["1080p", "4K", "720p"] }
+  },
+  "required_fields": ["user_type", "scenario", "guarantee_target"]
+}
+```
+
+## 决策流程（各阶段完成后立即衔接，无需停顿等待）
 
 **阶段1 — 理解意图**
 - 加载意图解析 Skill，解析用户输入并校验意图完整性
 - 如果意图不完整 → **必须暂停追问**，不要自行假设
 - 追问用自然对话语气，每轮最多 2-3 个字段，最多追问 3 轮
 - 本轮对话已获取的信息不要重复问
+- **`needs_clarification=false` → 立即执行阶段2，不需要中间确认**
 
 **阶段2 — 补全用户画像**
 - 加载用户画像 Skill，查询缺失字段
 - 能从意图推断的直接补全，关键字段追问，非关键字段用默认值
+- **画像补全完成 → 立即执行阶段3**
 
 **阶段3 — 生成优化方案**
 - 加载方案填充 Skill，基于意图+画像填充五大方案模板
 - 填充后向用户展示修改摘要
+- **方案生成完成 → 立即执行阶段4（约束校验）**
 
 **阶段4 — 约束校验（强制步骤，不可跳过）**
-- 加载约束校验 Skill，执行性能、组网、冲突三类检查
-- severity=error → 根据建议自动修正，重新校验
+- **直接调用 `check_constraints(plans_file)` 工具**（Python 函数，比 subprocess 更快）
+  - `plans_file` 由 `get_pipeline_file("plans")` 获取
+  - `intent_goal` 参数可省略，工具自动从 intent.json 读取
+- severity=error → **按 suggestions 立即修正方案参数，重新执行阶段3，无需等待用户确认**
 - severity=warning → 告知用户，等待确认
 - 连续 3 次失败 → 声明需人工介入
+- **`passed=true` → 立即执行阶段5**
 
 **阶段5 — 输出设备配置**
-- 加载配置转译 Skill，将方案转为设备下发格式
+- **直接调用 `translate_configs(plans_file)` 工具**（Python 函数，比 subprocess 更快）
+  - `plans_file` 由 `get_pipeline_file("plans")` 获取
+  - `device_id` 可选，默认为空字符串
 - 展示配置摘要、回退方案、注意事项
 
 ## 阶段间数据传递（节省 Token，必须遵守）
@@ -165,18 +215,18 @@ stage 名称对应关系：
 - `intent`      ← extract.py 产出
 - `profile`     ← query_profile.py 产出
 - `plans`       ← generate.py 产出
-- `constraint`  ← validate.py 产出
+- `constraint`  ← validate.py 产出（如使用 check_constraints 工具则跳过此步）
 
 调用示例：
 ```
 # 错误示范（浪费 3000+ token）：
-get_skill_script("config_translator", "translate.py", execute=True,
-                 args=['{"cei_perception": {...全量JSON...}}'])
+get_skill_script("plan_generator", "generate.py", execute=True,
+                 args=['{"intent_goal": {...全量JSON...}}'])
 
 # 正确方式（文件路径只有几十字符）：
-get_pipeline_file("plans")          # → "outputs/abc123/plans.json"
-get_skill_script("config_translator", "translate.py", execute=True,
-                 args=["--plans-file", "outputs/abc123/plans.json"])
+path = get_pipeline_file("intent")   # → "outputs/abc123/intent.json"
+get_skill_script("plan_generator", "generate.py", execute=True,
+                 args=["--intent-file", path])
 ```
 
 ## 通用规则
@@ -185,6 +235,92 @@ get_skill_script("config_translator", "translate.py", execute=True,
 - 如需领域知识（CEI 指标、设备能力、术语），使用 knowledge 检索
 - 用户意图明确且参数完整时，可跳过追问直接执行
 """
+
+
+# ─────────────────────────────────────────────────────────────
+# 脚本模块惰性加载工具
+# ─────────────────────────────────────────────────────────────
+
+def _load_script_module(relative_path: str):
+    """通过 importlib 按路径加载 skills/ 下的脚本模块，避免修改 sys.path"""
+    script_path = SKILLS_DIR / relative_path
+    spec = importlib.util.spec_from_file_location("_skill_script", script_path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)  # type: ignore[union-attr]
+    return module
+
+
+# ─────────────────────────────────────────────────────────────
+# 直接 Python 工具 — 约束校验 & 配置转译（无 subprocess 开销）
+# ─────────────────────────────────────────────────────────────
+
+def check_constraints(plans_file: str, intent_goal: dict[str, Any] | None = None) -> dict[str, Any]:
+    """执行约束校验（直接调用规则引擎，无 subprocess 开销）。
+
+    Args:
+        plans_file: plans.json 文件路径，由 get_pipeline_file("plans") 获取
+        intent_goal: 意图目标 dict（可省略，工具自动从 intent.json 读取）
+
+    Returns:
+        {passed, conflicts, warnings, failed_checks, suggestions}
+    """
+    if cfg.pipeline.use_llm_constraint:
+        return {"error": "LLM 约束校验尚未实现，请将 use_llm_constraint 保持 false"}
+
+    plans_path = Path(plans_file)
+    if not plans_path.exists():
+        return {"error": f"文件不存在: {plans_file}，请先执行 plan_generator 阶段"}
+
+    raw_plans: Any = json.loads(plans_path.read_text(encoding="utf-8"))
+    if isinstance(raw_plans, dict) and "plans" in raw_plans and isinstance(raw_plans["plans"], list):
+        plans: dict[str, Any] = {
+            item["template"]: item for item in raw_plans["plans"] if "template" in item
+        }
+    else:
+        plans = raw_plans
+
+    if intent_goal is None:
+        sid = get_current_session_id()
+        if sid:
+            intent_path = Path(f"outputs/{sid}/intent.json")
+            if intent_path.exists():
+                intent_goal = json.loads(intent_path.read_text(encoding="utf-8"))
+    if intent_goal is None:
+        intent_goal = {}
+
+    validate_mod = _load_script_module("constraint_checker/scripts/validate.py")
+    return validate_mod.run_all_checks(plans, intent_goal)
+
+
+def translate_configs(plans_file: str, device_id: str = "") -> dict[str, Any]:
+    """执行配置转译（直接调用字段映射引擎，无 subprocess 开销）。
+
+    Args:
+        plans_file: plans.json 文件路径，由 get_pipeline_file("plans") 获取
+        device_id: 目标设备 ID（可选，默认为空字符串）
+
+    Returns:
+        {configs, success, failed_fields, schema}
+    """
+    if cfg.pipeline.use_llm_translation:
+        return {"error": "LLM 配置转译尚未实现，请将 use_llm_translation 保持 false"}
+
+    plans_path = Path(plans_file)
+    if not plans_path.exists():
+        return {"error": f"文件不存在: {plans_file}，请先执行 plan_generator 阶段"}
+
+    raw_plans: Any = json.loads(plans_path.read_text(encoding="utf-8"))
+    if isinstance(raw_plans, dict) and "plans" in raw_plans and isinstance(raw_plans["plans"], list):
+        plans: dict[str, Any] = {
+            item["template"]: item for item in raw_plans["plans"] if "template" in item
+        }
+    else:
+        plans = raw_plans
+
+    translate_mod = _load_script_module("config_translator/scripts/translate.py")
+    result: dict[str, Any] = translate_mod.translate_all_plans(plans, device_id)
+    result["schema"] = translate_mod.load_config_schema()
+    return result
 
 
 # ─────────────────────────────────────────────────────────────
@@ -257,7 +393,7 @@ def build_agent() -> Agent:
     return Agent(
         model=model,
         skills=skills,
-        tools=[get_pipeline_file],
+        tools=[get_pipeline_file, check_constraints, translate_configs],
         knowledge=knowledge,
         instructions=SYSTEM_PROMPT,
 

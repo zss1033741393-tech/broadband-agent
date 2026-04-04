@@ -14,19 +14,17 @@ description: >
 
 ## 如何执行
 
-**第一步**：加载指令
+**推荐方式（直接 Python 工具，无 subprocess 开销）**：
 
 ```
-get_skill_instructions("constraint_checker")
+plans_file = get_pipeline_file("plans")   # → "outputs/<sid>/plans.json"
+check_constraints(plans_file)
+# intent_goal 可省略，工具自动从 outputs/<sid>/intent.json 读取
 ```
 
-**第二步**：获取产出文件路径，再执行约束校验脚本
+**备用方式（subprocess，独立 CLI 调试时使用）**：
 
 ```
-# 先获取上两阶段产出文件路径（避免内联完整 JSON 浪费 token）
-get_pipeline_file("plans")    # → "outputs/<sid>/plans.json"
-get_pipeline_file("intent")   # → "outputs/<sid>/intent.json"
-
 get_skill_script(
     "constraint_checker",
     "validate.py",
@@ -36,7 +34,10 @@ get_skill_script(
 )
 ```
 
-**脚本输出格式（stdout JSON）**：
+> `validate.py` 内部自动加载 `performance_rules.json` 和 `conflict_matrix.json`，
+> **不需要**提前调用 `get_skill_reference` 读取这些文件。
+
+**输出格式**：
 
 ```json
 {

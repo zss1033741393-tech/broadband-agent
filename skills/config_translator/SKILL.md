@@ -14,19 +14,17 @@ description: >
 
 ## 如何执行
 
-**第一步**：加载字段映射规则
+**推荐方式（直接 Python 工具，无 subprocess 开销）**：
 
 ```
-get_skill_instructions("config_translator")
-get_skill_reference("config_translator", "field_mapping.md")
+plans_file = get_pipeline_file("plans")   # → "outputs/<sid>/plans.json"
+translate_configs(plans_file)
+# device_id 可选，如需传入：translate_configs(plans_file, device_id="<id>")
 ```
 
-**第二步**：获取方案产出文件路径，再执行转译脚本
+**备用方式（subprocess，独立 CLI 调试时使用）**：
 
 ```
-# 先获取上一阶段产出文件路径（避免内联完整 JSON 浪费 token）
-get_pipeline_file("plans")    # → "outputs/<sid>/plans.json"
-
 get_skill_script(
     "config_translator",
     "translate.py",
@@ -36,7 +34,10 @@ get_skill_script(
 )
 ```
 
-**脚本输出格式（stdout JSON）**：
+> `translate.py` 内部已硬编码 `FIELD_MAPPINGS`，并自动加载 `config_schema.json`，
+> **不需要**提前调用 `get_skill_reference` 读取 `field_mapping.md` 或 `config_schema.json`。
+
+**输出格式**：
 
 ```json
 {

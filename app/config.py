@@ -38,6 +38,9 @@ class PipelineConfig(BaseModel):
     debug_mode: bool = True
     clarification_max_rounds: int = 3
     clarification_max_fields_per_round: int = 3
+    # 预留扩展开关：True 时切换为 LLM 实现，False 时使用规则引擎（当前原型）
+    use_llm_constraint: bool = False
+    use_llm_translation: bool = False
 
 
 class AppConfig(BaseModel):

@@ -1,7 +1,7 @@
 pipeline:
   max_turns: 15
   max_retry_on_constraint_fail: 3
-  num_history_runs: 10
+  num_history_runs: 4
   skills_dir: "./skills"
   debug_mode: true
   clarification_max_rounds: 3
