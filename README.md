@@ -1,6 +1,6 @@
-# 家宽体验感知优化 Agent
+# 家宽 CEI 体验优化 Agent
 
-家庭宽带用户体验感知优化智能体。基于 [Agno](https://github.com/agno-agi/agno) 框架，通过多 Agent 协作实现从用户意图到设备配置的端到端生成。
+家庭宽带 CEI（Customer Experience Index）体验感知优化智能体。基于 [Agno](https://github.com/agno-agi/agno) 框架，通过多 Agent 协作实现从用户意图到设备配置的端到端生成。
 
 ## 核心设计
 
@@ -264,6 +264,19 @@ pipeline:
   max_retry_on_constraint_fail: 3
   use_llm_constraint: false      # 切换约束校验为 LLM 实现（预留）
   use_llm_translation: false     # 切换配置转译为 LLM 实现（预留）
+  agents:                        # 各子 Agent 独立配置
+    intent:
+      num_history_runs: 4
+      model: ~                   # null = 继承 llm.yaml 的模型，可单独指定
+    plan:
+      num_history_runs: 2
+      model: ~
+    constraint:
+      num_history_runs: 2
+      model: ~
+    config:
+      num_history_runs: 1
+      model: ~
 
 storage:
   sqlite_db_path: "data/agent.db"
