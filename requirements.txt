@@ -12,7 +12,7 @@ anthropic>=0.40         # Anthropic Claude（provider=anthropic 时需要）
 # ── Web 服务 ──────────────────────────────────────────────────
 fastapi>=0.115
 uvicorn[standard]>=0.30
-gradio>=4.0             # 调试界面（4.x 和 5.x 均兼容）
+gradio>=4.0             # 调试界面，沙箱验证版本 6.11.0，兼容 4.x+（已移除 5.x 专属参数）
 
 # ── 数据持久化 ────────────────────────────────────────────────
 lancedb>=0.12           # 向量存储（Knowledge RAG）
