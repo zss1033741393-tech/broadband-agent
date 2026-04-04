@@ -1,0 +1,14 @@
+# 复制此文件为 llm.yaml 并填入真实配置
+# configs/llm.yaml 已加入 .gitignore，不会提交到 git
+
+# DeepSeek
+api_key: "sk-xxx"
+base_url: "https://api.deepseek.com/v1"
+model: "deepseek-reasoner"   # 思考模式（R1）; deepseek-chat 为非思考模式
+temperature: 0.7
+max_tokens: 8192
+
+# OpenAI 兼容示例
+# api_key: "sk-xxx"
+# base_url: "https://api.openai.com/v1"
+# model: "gpt-4o"

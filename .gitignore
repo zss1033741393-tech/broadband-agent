@@ -214,6 +214,9 @@ docs/design/
 # UV lock file（不提交，依赖 pyproject.toml 管理）
 uv.lock
 
+# 模型配置（含 api_key，禁止提交）
+configs/llm.yaml
+
 # 运行时数据（SQLite + LanceDB 向量存储）
 data/
 logs/
