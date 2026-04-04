@@ -24,6 +24,7 @@ from agno.skills import LocalSkills, Skills
 from agno.vectordb.lancedb import LanceDb
 
 from app.config import load_config
+from app.outputs.sink import output_sink_hook
 
 logger = logging.getLogger("agent")
 
@@ -173,6 +174,7 @@ def build_agent() -> Agent:
         # 会话持久化（SQLite）
         db=SqliteDb(db_file=cfg.storage.sqlite_db_path),
 
+        tool_hooks=[output_sink_hook],
         pre_hooks=[PromptInjectionGuardrail()],
         reasoning=cfg.pipeline.reasoning,
         markdown=True,

@@ -214,3 +214,4 @@ docs/design/
 # 运行时数据（SQLite + LanceDB 向量存储）
 data/
 logs/
+/outputs/
