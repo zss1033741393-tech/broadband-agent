@@ -13,17 +13,46 @@ description: >
 - 用户补充/修改需求信息
 - 需要追问澄清模糊表述
 
-## 处理步骤
-1. 读取 references/intent_schema.json 了解目标结构
-2. 从用户输入中提取可识别的字段
-3. 调用 scripts/parse_intent.py 进行语义解析
-4. 检查缺失字段，参考 references/examples.md 生成自然的追问
-5. 所有字段完整后输出 IntentGoal JSON
+## 如何执行
+
+**第一步**：先加载指令
+
+```
+get_skill_instructions("intent_parser")
+```
+
+**第二步**：可选——读取意图目标的字段结构
+
+```
+get_skill_reference("intent_parser", "intent_schema.json")
+```
+
+**第三步**：执行意图解析脚本
+
+```
+get_skill_script(
+    "intent_parser",
+    "extract.py",
+    execute=True,
+    args=['<intent_goal_json>']   # 已提取的意图字段，首次传 "{}"
+)
+```
+
+**脚本输出格式（stdout JSON）**：
+
+```json
+{
+  "complete": false,
+  "missing_fields": ["scenario", "guarantee_period"],
+  "followup": "您希望优化哪方面的网络体验？（如：上行带宽、低延迟）",
+  "schema": { ... }
+}
+```
+
+- `complete=false` → 用 `followup` 中的话术向用户追问
+- `complete=true` → 意图完整，继续执行下一阶段
 
 ## 规则
-- 模糊表述要结合上下文推断，不要每个字段都追问
-- 优先从用户画像 Skill 获取历史数据自动补全
+- 模糊表述结合上下文推断，不要逐字段追问
+- 优先从用户画像 Skill 获取历史数据补全
 - 追问最多 3 轮，超过后用合理默认值补全
-
-## 输出格式
-IntentGoal JSON（见 references/intent_schema.json）

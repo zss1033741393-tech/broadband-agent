@@ -5,7 +5,8 @@ description = "家宽体验感知优化 Agent 智能体原型"
 requires-python = ">=3.11"
 
 dependencies = [
-    "agno>=1.0",
+    "agno>=2.5.14,<3.0",
+    "lancedb>=0.12",
     "fastapi>=0.115",
     "uvicorn>=0.30",
     "gradio>=5.0",

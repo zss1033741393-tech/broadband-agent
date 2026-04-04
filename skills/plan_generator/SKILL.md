@@ -14,18 +14,49 @@ description: >
 - 用户修改了需求，需要重新调整方案参数
 - 约束校验失败后，需要根据失败原因调整参数
 
-## 处理步骤
-1. 读取 IntentGoal
-2. 遍历 references/ 中的 5 个方案模板 JSON
-3. 对照 references/filling_rules.md 判断每个模板中哪些参数需要修改
-4. 调用 scripts/filler.py 执行填充
-5. 输出填充后的方案 JSON + 修改说明
+## 如何执行
+
+**第一步**：加载指令和规则
+
+```
+get_skill_instructions("plan_generator")
+get_skill_reference("plan_generator", "filling_rules.md")
+```
+
+**第二步**：执行方案填充脚本（内部并行处理 5 个模板）
+
+```
+get_skill_script(
+    "plan_generator",
+    "generate.py",
+    execute=True,
+    args=['<intent_goal_json>']   # 完整的 IntentGoal JSON
+)
+```
+
+**脚本输出格式（stdout JSON）**：
+
+```json
+{
+  "plans": [
+    {
+      "plan_name": "CEI 感知方案",
+      "template": "cei_perception.json",
+      "filled_data": { ... },
+      "changes": ["cei_perception.warning_threshold.latency_ms: 100 → 50"],
+      "status": "filled"
+    },
+    ...
+  ],
+  "rules": "..."
+}
+```
+
+- `plans` 包含 5 项，每项对应一个模板
+- `changes` 列出相对默认值的修改项
+- 向用户展示 changes 摘要后，继续执行约束校验
 
 ## 规则
 - 不需要修改的参数保持模板默认值
-- 五个模板相互独立，可并行处理（asyncio.gather）
-- 填充后在修改说明中列出每个被改的字段和原因
-- 如果是约束校验回退，只调整冲突相关的参数
-
-## 参数决策规则速查
-见 references/filling_rules.md
+- 脚本内部并行处理 5 个模板（asyncio.gather）
+- 填充后必须立即进行约束校验（constraint_checker 是强制步骤）

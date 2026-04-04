@@ -8,9 +8,13 @@ from __future__ import annotations
 
 import logging
 
+from agno.db.sqlite import SqliteDb
 from agno.os import AgentOS
 
 from app.agent.agent import get_agent
+from app.config import load_config
+
+_cfg = load_config()
 
 logger = logging.getLogger("app")
 
@@ -21,6 +25,7 @@ logger = logging.getLogger("app")
 
 agent_os = AgentOS(
     agents=[get_agent()],
+    db=SqliteDb(db_file=_cfg.storage.sqlite_db_path),  # AgentOS 级别会话持久化
     tracing=True,      # 原生链路追踪，连接 os.agno.com 可视化
 )
 

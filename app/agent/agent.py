@@ -16,6 +16,7 @@ import logging
 from pathlib import Path
 
 from agno.agent import Agent
+from agno.db.sqlite import SqliteDb
 from agno.guardrails import PromptInjectionGuardrail
 from agno.knowledge import Knowledge
 from agno.models.openai import OpenAIChat
@@ -169,8 +170,8 @@ def build_agent() -> Agent:
         # User Memory（跨会话记忆）— P1，用户系统就绪后启用
         # enable_user_memories=True,
 
-        # Storage（会话持久化）— P1，待 agno.storage 模块稳定后启用
-        # storage=SqliteAgentStorage(table_name=..., db_file=...),
+        # 会话持久化（SQLite）
+        db=SqliteDb(db_file=cfg.storage.sqlite_db_path),
 
         pre_hooks=[PromptInjectionGuardrail()],
         reasoning=cfg.pipeline.reasoning,

@@ -210,3 +210,7 @@ __marimo__/
 design.md
 *_design.md
 docs/design/
+
+# 运行时数据（SQLite + LanceDB 向量存储）
+data/
+logs/
