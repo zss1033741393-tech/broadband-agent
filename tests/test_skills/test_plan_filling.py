@@ -7,7 +7,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from skills.plan_filling.scripts.filler import (
+from skills.plan_generator.scripts.generate import (
     build_params_from_intent,
     fill_all_templates,
     fill_template,

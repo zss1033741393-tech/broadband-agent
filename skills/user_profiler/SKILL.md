@@ -1,5 +1,5 @@
 ---
-name: user_profile
+name: user_profiler
 description: >
   查询和补全用户画像信息。从历史数据、应用行为、网络 KPI 中提取
   用户先验信息。当需要了解用户历史行为、网络状况、或补全画像字段时使用。

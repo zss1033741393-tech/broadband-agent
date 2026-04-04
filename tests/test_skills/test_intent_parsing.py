@@ -6,7 +6,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from skills.intent_parsing.scripts.parse_intent import (
+from skills.intent_parser.scripts.extract import (
     generate_followup_questions,
     load_intent_schema,
     merge_with_profile,

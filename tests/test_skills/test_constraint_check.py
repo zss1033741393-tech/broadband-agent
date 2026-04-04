@@ -4,7 +4,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from skills.constraint_check.scripts.checker import (
+from skills.constraint_checker.scripts.validate import (
     check_conflict_constraints,
     check_performance_constraints,
     run_all_checks,

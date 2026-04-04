@@ -1,37 +1,58 @@
-"""配置加载模块 — 从 YAML 文件读取所有配置"""
+"""统一配置加载 — 从 configs/*.yaml 读取，全部通过 load_config() 获取"""
+from __future__ import annotations
+
+from functools import lru_cache
 from pathlib import Path
-from typing import Any
+from typing import Optional
 
 import yaml
+from pydantic import BaseModel
 
 CONFIG_DIR = Path(__file__).parent.parent / "configs"
 
 
-def _load_yaml(filename: str) -> dict[str, Any]:
-    """加载指定 YAML 配置文件"""
-    path = CONFIG_DIR / filename
-    with path.open(encoding="utf-8") as f:
-        return yaml.safe_load(f) or {}
+class LLMConfig(BaseModel):
+    api_key: str
+    base_url: Optional[str] = None
+    model: str = "gpt-4o"
+    temperature: float = 0.7
+    max_tokens: int = 4096
 
 
-def load_llm_config() -> dict[str, Any]:
-    """加载 LLM 模型配置"""
-    return _load_yaml("llm.yaml")
+class StorageConfig(BaseModel):
+    sqlite_db_path: str = "./data/agent.db"
+    sqlite_table: str = "agent_sessions"
+    lancedb_uri: str = "./data/lancedb"
+    lancedb_table: str = "domain_knowledge"
 
 
-def load_pipeline_config() -> dict[str, Any]:
-    """加载运行参数配置"""
-    return _load_yaml("pipeline.yaml")
+class PipelineConfig(BaseModel):
+    max_turns: int = 15
+    max_retry_on_constraint_fail: int = 3
+    num_history_runs: int = 10
+    skills_dir: str = "./skills"
+    debug_mode: bool = True
+    reasoning: bool = True
+    clarification_max_rounds: int = 3
+    clarification_max_fields_per_round: int = 3
 
 
-def load_logging_config() -> dict[str, Any]:
-    """加载日志配置"""
-    return _load_yaml("logging.yaml")
+class AppConfig(BaseModel):
+    llm: LLMConfig
+    storage: StorageConfig
+    pipeline: PipelineConfig
 
 
-def get_model_config(tier: str = "main") -> dict[str, Any]:
-    """获取指定 tier 的模型配置"""
-    llm_cfg = load_llm_config()
-    default = llm_cfg.get("default", "main")
-    models = llm_cfg.get("models", {})
-    return models.get(tier, models.get(default, {}))
+@lru_cache(maxsize=1)
+def load_config() -> AppConfig:
+    """从 configs/ 目录加载所有 YAML 配置，结果缓存"""
+    with open(CONFIG_DIR / "llm.yaml", encoding="utf-8") as f:
+        llm_raw = yaml.safe_load(f) or {}
+    with open(CONFIG_DIR / "pipeline.yaml", encoding="utf-8") as f:
+        pipeline_raw = yaml.safe_load(f) or {}
+
+    return AppConfig(
+        llm=LLMConfig(**llm_raw),
+        storage=StorageConfig(**pipeline_raw.get("storage", {})),
+        pipeline=PipelineConfig(**pipeline_raw.get("pipeline", {})),
+    )

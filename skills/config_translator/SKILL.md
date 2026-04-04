@@ -1,5 +1,5 @@
 ---
-name: config_translation
+name: config_translator
 description: >
   将语义化方案 JSON 转译为设备可执行的配置格式（NL2JSON/NL2DSL）。
   这是最终输出步骤，将方案转为可下发到设备的配置文件。

@@ -1,5 +1,5 @@
 ---
-name: domain_knowledge
+name: domain_expert
 description: >
   家宽领域专业知识。包含 CEI 指标定义、设备型号能力矩阵、术语表。
   当 Agent 需要理解专业概念、查询设备能力、或解释术语时使用此 Skill。

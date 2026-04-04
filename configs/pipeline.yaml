@@ -1,16 +1,18 @@
-# 运行参数配置
-
 pipeline:
-  max_skill_rounds: 20              # Agent 最大 Skill 调用轮次（防止死循环）
-  plan_filling_parallel: true       # 方案填充是否并行
-  max_retry_on_constraint_fail: 3   # 约束校验失败最大回退次数
+  max_turns: 15
+  max_retry_on_constraint_fail: 3
+  num_history_runs: 10
+  skills_dir: "./skills"
+  debug_mode: true
+  reasoning: true
+  clarification_max_rounds: 3
+  clarification_max_fields_per_round: 3
 
 storage:
   sqlite_db_path: "./data/agent.db"
-  traces_dir: "./traces"
-  outputs_dir: "./outputs"
+  sqlite_table: "agent_sessions"
+  lancedb_uri: "./data/lancedb"
+  lancedb_table: "domain_knowledge"
 
-server:
-  host: "0.0.0.0"
-  port: 8000
-  reload: true
+logging:
+  level: "DEBUG"

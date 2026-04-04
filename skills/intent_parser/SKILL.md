@@ -1,5 +1,5 @@
 ---
-name: intent_parsing
+name: intent_parser
 description: >
   解析用户自然语言输入为结构化意图目标。识别用户类型、场景、保障时段、
   保障对象、核心指标。信息不完整时生成追问。

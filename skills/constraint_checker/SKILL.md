@@ -1,5 +1,5 @@
 ---
-name: constraint_check
+name: constraint_checker
 description: >
   校验填充后的方案是否可执行。检查性能约束、组网方式约束、方案间策略冲突。
   校验不通过时返回失败原因，供 Agent 决策是否回退调整方案。

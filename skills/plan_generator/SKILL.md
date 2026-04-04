@@ -1,5 +1,5 @@
 ---
-name: plan_filling
+name: plan_generator
 description: >
   基于意图目标填充五大方案 JSON 模板。读取 references/ 中的方案模板，
   根据 filling_rules.md 决策哪些参数需要调整，执行填充。
