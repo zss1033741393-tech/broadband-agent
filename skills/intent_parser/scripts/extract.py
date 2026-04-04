@@ -57,3 +57,29 @@ def generate_followup_questions(missing_fields: list[str]) -> str:
     return "为了更好地配置方案，我需要了解几个信息：\n" + "\n".join(
         f"{i+1}. {q}" for i, q in enumerate(questions)
     )
+
+
+if __name__ == "__main__":
+    """CLI 入口 — 供 get_skill_script(execute=True) 调用
+
+    用法:
+        python extract.py '<intent_goal_json>'
+
+    输出: JSON 字符串，含 complete / missing_fields / followup / schema
+    """
+    import sys
+
+    intent_goal_json = sys.argv[1] if len(sys.argv) > 1 else "{}"
+    try:
+        intent_goal = json.loads(intent_goal_json) if intent_goal_json.strip() else {}
+    except json.JSONDecodeError:
+        intent_goal = {}
+
+    complete, missing = validate_intent(intent_goal)
+    followup = generate_followup_questions(missing) if not complete else ""
+    schema = load_intent_schema()
+
+    print(json.dumps(
+        {"complete": complete, "missing_fields": missing, "followup": followup, "schema": schema},
+        ensure_ascii=False,
+    ))

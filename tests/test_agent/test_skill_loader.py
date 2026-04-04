@@ -1,12 +1,15 @@
-"""Skills 发现与工具注册测试
+"""Skills 发现与脚本 CLI 入口测试
 
-测试新架构下：
-  - _discover_skills()：LocalSkills 自动扫描 skills/ 目录
-  - _build_agno_tools()：各 Skill 脚本注册为 Agno Function tools
+新架构下：
+  - discover_skills(): LocalSkills 原生扫描，每个技能目录独立注册
+  - Skills 自动提供 get_skill_instructions / get_skill_script 元工具
+  - 每个脚本有 CLI 入口，可被 get_skill_script(execute=True) 调用
+  - 不存在 _build_agno_tools() 或手写工具包装器
 """
 from __future__ import annotations
 
 import json
+import subprocess
 import sys
 from pathlib import Path
 
@@ -14,84 +17,125 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
+SKILLS_DIR = Path(__file__).parent.parent.parent / "skills"
+
 
 class TestDiscoverSkills:
-    def test_discover_skills_returns_skills_object(self) -> None:
-        """_discover_skills 应返回 Agno Skills 实例"""
-        from agno.skills import Skills
-        from app.agent.agent import _discover_skills
-        skills = _discover_skills()
-        assert isinstance(skills, Skills)
 
-    def test_skills_contains_all_skill_dirs(self) -> None:
-        """Skills 应包含所有含 SKILL.md 的子目录"""
-        from app.agent.agent import _discover_skills
-        skills = _discover_skills()
+    def test_discover_skills_returns_skills_object(self) -> None:
+        from agno.skills import Skills
+        from app.agent.agent import discover_skills, SKILLS_DIR
+        assert isinstance(discover_skills(SKILLS_DIR), Skills)
+
+    def test_discovers_all_six_skills(self) -> None:
+        from app.agent.agent import discover_skills, SKILLS_DIR
+        skills = discover_skills(SKILLS_DIR)
         names = skills.get_skill_names()
         for expected in ["intent_parser", "user_profiler", "plan_generator",
                          "constraint_checker", "config_translator", "domain_expert"]:
             assert expected in names, f"Skill '{expected}' 未被发现"
 
-    def test_skills_have_descriptions(self) -> None:
-        """每个 Skill 应有非空 description"""
-        from app.agent.agent import _discover_skills
-        skills = _discover_skills()
+    def test_all_skills_have_descriptions(self) -> None:
+        from app.agent.agent import discover_skills, SKILLS_DIR
+        skills = discover_skills(SKILLS_DIR)
         all_skills = skills.get_all_skills()
-        # get_all_skills() returns list or dict depending on version
         skill_list = all_skills.values() if isinstance(all_skills, dict) else all_skills
         for skill in skill_list:
             assert skill.description, f"Skill '{skill.name}' 缺少 description"
 
-    def test_skills_provide_meta_tools(self) -> None:
-        """Skills 应提供 get_skill_instructions 等元工具"""
-        from agno.tools.function import Function
-        from app.agent.agent import _discover_skills
-        skills = _discover_skills()
-        tools = skills.get_tools()
+    def test_meta_tools_registered(self) -> None:
+        """Skills 应自动注入 3 个元工具，不需要手写工具包装"""
+        from app.agent.agent import discover_skills, SKILLS_DIR
+        tools = discover_skills(SKILLS_DIR).get_tools()
         tool_names = {t.name for t in tools}
-        assert "get_skill_instructions" in tool_names
-        assert "get_skill_reference" in tool_names
-        assert "get_skill_script" in tool_names
+        assert tool_names == {"get_skill_instructions", "get_skill_reference", "get_skill_script"}
+
+    def test_no_manual_tool_builders(self) -> None:
+        """agent.py 不应存在 _build_agno_tools — 技能通过元工具原生执行"""
+        import app.agent.agent as m
+        assert not hasattr(m, "_build_agno_tools")
+        assert not hasattr(m, "_import_script")
+
+    def test_executable_scripts_discovered(self) -> None:
+        """每个有 scripts/ 目录的 Skill 应至少有一个脚本被发现"""
+        from app.agent.agent import discover_skills, SKILLS_DIR
+        skills = discover_skills(SKILLS_DIR)
+        all_skills = skills.get_all_skills()
+        skill_list = all_skills.values() if isinstance(all_skills, dict) else all_skills
+        skills_with_scripts = [s for s in skill_list if s.name != "domain_expert"]
+        for skill in skills_with_scripts:
+            assert skill.scripts, f"Skill '{skill.name}' 应有脚本文件"
 
 
-class TestBuildAgnoTools:
-    def test_build_agno_tools_returns_functions(self) -> None:
-        """_build_agno_tools 应为每个 Skill 返回 Agno Function 对象"""
-        from agno.tools.function import Function
-        from app.agent.agent import _build_agno_tools
-        tools = _build_agno_tools()
-        assert len(tools) > 0, "应至少注册一个 Agno tool"
-        for t in tools:
-            assert isinstance(t, Function), f"{t} 不是 Agno Function"
+class TestScriptCLIEntryPoints:
+    """验证每个脚本有 CLI 入口，可被 subprocess 执行"""
 
-    def test_tool_names_match_expected(self) -> None:
-        """注册的 tool 名称应在预期集合中"""
-        from app.agent.agent import _build_agno_tools
-        tools = _build_agno_tools()
-        tool_names = {t.name for t in tools}
-        expected = {"intent_parsing", "user_profile", "plan_filling", "constraint_check", "config_translation"}
-        assert tool_names <= expected, f"多余的 tool 名称: {tool_names - expected}"
+    def _run_script(self, script_path: Path, *args) -> dict:
+        result = subprocess.run(
+            [sys.executable, str(script_path)] + list(args),
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        assert result.returncode == 0, f"脚本 {script_path.name} 返回码非零: {result.stderr}"
+        return json.loads(result.stdout)
 
-    def test_intent_parsing_tool_callable(self) -> None:
-        """intent_parsing tool 应能正常调用并返回合法 JSON"""
-        from app.agent.agent import _build_agno_tools
-        tools = _build_agno_tools()
-        ip_tool = next((t for t in tools if t.name == "intent_parsing"), None)
-        assert ip_tool is not None, "未找到 intent_parsing tool"
-        result = ip_tool.entrypoint(intent_goal_json="{}")
-        data = json.loads(result)
+    def test_extract_cli_empty_intent(self) -> None:
+        """extract.py CLI：空意图应返回 complete=false"""
+        data = self._run_script(SKILLS_DIR / "intent_parser/scripts/extract.py", "{}")
         assert "complete" in data
         assert "missing_fields" in data
         assert "schema" in data
+        assert data["complete"] is False
 
-    def test_constraint_check_tool_callable(self) -> None:
-        """constraint_check tool 应能正常调用并返回合法 JSON"""
-        from app.agent.agent import _build_agno_tools
-        tools = _build_agno_tools()
-        cc_tool = next((t for t in tools if t.name == "constraint_check"), None)
-        assert cc_tool is not None, "未找到 constraint_check tool"
-        plans = {"cei_perception": {"trigger_window": {"start": "07:00", "end": "11:00"}}}
-        result = cc_tool.entrypoint(plans_json=json.dumps(plans))
-        data = json.loads(result)
+    def test_extract_cli_complete_intent(self) -> None:
+        """extract.py CLI：完整意图应返回 complete=true"""
+        intent = {"user_type": "直播用户", "scenario": "上行带宽保障",
+                  "guarantee_target": {"priority_level": "high"}}
+        data = self._run_script(
+            SKILLS_DIR / "intent_parser/scripts/extract.py",
+            json.dumps(intent)
+        )
+        assert data["complete"] is True
+
+    def test_query_profile_cli(self) -> None:
+        """query_profile.py CLI：应返回画像模板和缺失字段"""
+        data = self._run_script(SKILLS_DIR / "user_profiler/scripts/query_profile.py", "{}")
+        assert "template" in data
+        assert "missing_fields" in data
+        assert "field_rules" in data
+
+    def test_generate_cli(self) -> None:
+        """generate.py CLI：应返回 5 个方案填充结果"""
+        intent = {
+            "user_type": "直播用户",
+            "guarantee_target": {"sensitivity": "卡顿", "priority_level": "high"},
+            "guarantee_period": {"start_time": "20:00", "end_time": "23:00"},
+        }
+        data = self._run_script(
+            SKILLS_DIR / "plan_generator/scripts/generate.py",
+            json.dumps(intent)
+        )
+        assert "plans" in data
+        assert len(data["plans"]) == 5
+
+    def test_validate_cli(self) -> None:
+        """validate.py CLI：应返回校验结果"""
+        plans = {}
+        intent = {"guarantee_period": {"start_time": "20:00", "end_time": "23:00"}}
+        data = self._run_script(
+            SKILLS_DIR / "constraint_checker/scripts/validate.py",
+            json.dumps(plans),
+            json.dumps(intent),
+        )
         assert "passed" in data
-        assert "violations" in data
+
+    def test_translate_cli(self) -> None:
+        """translate.py CLI：应返回配置转译结果"""
+        plans = {}
+        data = self._run_script(
+            SKILLS_DIR / "config_translator/scripts/translate.py",
+            json.dumps(plans),
+        )
+        assert "configs" in data
+        assert "schema" in data

@@ -74,3 +74,30 @@ def check_missing_fields(profile: dict[str, Any]) -> list[str]:
     if not period.get("start_time") or period.get("start_time") == "":
         missing.append("guarantee_period")
     return missing
+
+
+if __name__ == "__main__":
+    """CLI 入口 — 供 get_skill_script(execute=True) 调用
+
+    用法:
+        python query_profile.py '<known_info_json>'
+
+    输出: JSON 字符串，含 template / missing_fields / field_rules
+    """
+    import sys
+
+    known_info_json = sys.argv[1] if len(sys.argv) > 1 else "{}"
+    try:
+        known = json.loads(known_info_json) if known_info_json.strip() else {}
+    except json.JSONDecodeError:
+        known = {}
+
+    profile = get_empty_profile()
+    profile["user_profile"].update(known)
+    missing = check_missing_fields(profile)
+    rules = load_field_rules()
+
+    print(json.dumps(
+        {"template": profile, "missing_fields": missing, "field_rules": rules},
+        ensure_ascii=False,
+    ))

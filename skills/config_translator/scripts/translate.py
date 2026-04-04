@@ -134,3 +134,29 @@ def translate_all_plans(
 def load_config_schema() -> dict[str, Any]:
     """加载设备配置 JSON Schema"""
     return json.loads((REFERENCES_DIR / "config_schema.json").read_text(encoding="utf-8"))
+
+
+if __name__ == "__main__":
+    """CLI 入口 — 供 get_skill_script(execute=True) 调用
+
+    用法:
+        python translate.py '<plans_json>' ['<device_id>']
+
+    输出: JSON 字符串，含 configs / success / failed_fields / schema
+    """
+    import sys
+
+    plans_json = sys.argv[1] if len(sys.argv) > 1 else "{}"
+    device_id = sys.argv[2] if len(sys.argv) > 2 else ""
+
+    try:
+        plans = json.loads(plans_json)
+    except json.JSONDecodeError:
+        print(json.dumps({"error": "plans_json 格式错误"}, ensure_ascii=False))
+        sys.exit(1)
+
+    result = translate_all_plans(plans, device_id)
+    schema = load_config_schema()
+    result["schema"] = schema
+
+    print(json.dumps(result, ensure_ascii=False))

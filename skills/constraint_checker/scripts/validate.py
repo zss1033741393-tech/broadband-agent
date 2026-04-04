@@ -125,3 +125,31 @@ def _time_in_range(time_str: str, start: str, end: str) -> bool:
         return start <= time_str <= end
     # 跨午夜情况
     return time_str >= start or time_str <= end
+
+
+if __name__ == "__main__":
+    """CLI 入口 — 供 get_skill_script(execute=True) 调用
+
+    用法:
+        python validate.py '<plans_json>' '<intent_goal_json>'
+
+    输出: JSON 字符串，含 passed / conflicts / warnings / suggestions
+    """
+    import sys
+
+    plans_json = sys.argv[1] if len(sys.argv) > 1 else "{}"
+    intent_goal_json = sys.argv[2] if len(sys.argv) > 2 else "{}"
+
+    try:
+        plans = json.loads(plans_json)
+    except json.JSONDecodeError:
+        print(json.dumps({"error": "plans_json 格式错误"}, ensure_ascii=False))
+        sys.exit(1)
+
+    try:
+        intent_goal = json.loads(intent_goal_json)
+    except json.JSONDecodeError:
+        intent_goal = {}
+
+    result = run_all_checks(plans, intent_goal)
+    print(json.dumps(result, ensure_ascii=False))

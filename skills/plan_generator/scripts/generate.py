@@ -182,3 +182,29 @@ async def fill_all_templates(
         else:
             output.append(result)  # type: ignore[arg-type]
     return output
+
+
+if __name__ == "__main__":
+    """CLI 入口 — 供 get_skill_script(execute=True) 调用
+
+    用法:
+        python generate.py '<intent_goal_json>'
+
+    输出: JSON 字符串，含 plans(list) / rules(str)
+    """
+    import sys
+
+    intent_goal_json = sys.argv[1] if len(sys.argv) > 1 else "{}"
+    try:
+        intent_goal = json.loads(intent_goal_json)
+    except json.JSONDecodeError:
+        print(json.dumps({"error": "intent_goal_json 格式错误"}, ensure_ascii=False))
+        sys.exit(1)
+
+    results = asyncio.run(fill_all_templates(intent_goal))
+    rules = load_filling_rules()
+
+    print(json.dumps(
+        {"plans": results, "rules": rules[:500]},
+        ensure_ascii=False,
+    ))

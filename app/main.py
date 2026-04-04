@@ -10,7 +10,7 @@ import logging
 
 from agno.os import AgentOS
 
-from app.agent.agent import agent
+from app.agent.agent import get_agent
 
 logger = logging.getLogger("app")
 
@@ -20,7 +20,7 @@ logger = logging.getLogger("app")
 # ─────────────────────────────────────────────────────────────
 
 agent_os = AgentOS(
-    agents=[agent],
+    agents=[get_agent()],
     tracing=True,      # 原生链路追踪，连接 os.agno.com 可视化
 )
 
@@ -43,7 +43,7 @@ def _mount_gradio() -> None:
         """Gradio 流式对话函数"""
         response = ""
         try:
-            for chunk in agent.run(message, stream=True):
+            for chunk in get_agent().run(message, stream=True):
                 if hasattr(chunk, "content") and chunk.content:
                     response += chunk.content
             return response
