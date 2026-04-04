@@ -112,16 +112,16 @@ class TestAgentInit:
                 f"SYSTEM_PROMPT 硬编码了技能名 '{name}'，应由 <skills_system> 动态注入"
 
     def test_build_agent_without_network(self) -> None:
-        """build_agent 不应发起网络请求"""
-        with patch("app.agent.agent.Agent") as MockAgent, \
-             patch("app.agent.agent.OpenAIChat"), \
-             patch("app.agent.agent.build_knowledge", return_value=None):
-            MockAgent.return_value = MagicMock()
+        """build_agent（多 Agent 架构）不应发起网络请求，返回 Team 实例"""
+        with patch("app.agent.team.Team") as MockTeam, \
+             patch("app.agent.team.OpenAIChat"), \
+             patch("app.agent.team.build_knowledge", return_value=None):
+            MockTeam.return_value = MagicMock()
             from app.agent.agent import build_agent
             agent = build_agent()
-            assert MockAgent.called
+            assert MockTeam.called
             # 验证 tool_call_limit 被传入（对应设计文档的 max_turns 概念）
-            call_kwargs = MockAgent.call_args[1]
+            call_kwargs = MockTeam.call_args[1]
             assert "tool_call_limit" in call_kwargs
 
 

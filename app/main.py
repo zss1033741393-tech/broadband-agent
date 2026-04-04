@@ -16,7 +16,7 @@ import logging
 from agno.db.sqlite import SqliteDb
 from agno.os import AgentOS
 
-from app.agent.agent import get_agent
+from app.agent.team import get_team
 from app.config import load_config
 from app.logger.setup import setup_logging
 
@@ -27,7 +27,7 @@ _cfg = load_config()
 logger = logging.getLogger("app")
 
 agent_os = AgentOS(
-    agents=[get_agent()],
+    teams=[get_team()],
     db=SqliteDb(db_file=_cfg.storage.sqlite_db_path),
     tracing=True,
 )
