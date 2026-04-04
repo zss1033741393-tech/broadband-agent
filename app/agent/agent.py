@@ -22,6 +22,7 @@ from agno.knowledge import Knowledge
 from agno.models.openai import OpenAIChat
 from agno.skills import LocalSkills, Skills
 from agno.vectordb.lancedb import LanceDb
+from app.config import LLMConfig
 
 from app.config import load_config
 from app.outputs.sink import output_sink_hook
@@ -144,16 +145,33 @@ SYSTEM_PROMPT = """\
 # Agent 构建
 # ─────────────────────────────────────────────────────────────
 
+def _build_model(llm: LLMConfig):
+    """按 provider 字段选择 Agno 模型类
+
+    provider=openai（默认）: OpenAIChat — 支持所有 OpenAI 兼容接口
+      包括 OpenAI / DeepSeek / 本地 vLLM / 其他兼容服务
+    provider=anthropic: Claude — Agno 原生 Anthropic 集成
+      需要安装 `pip install anthropic`
+    """
+    if llm.provider == "anthropic":
+        from agno.models.anthropic.claude import Claude
+        return Claude(
+            id=llm.model,
+            api_key=llm.api_key,
+        )
+    # 默认：openai 兼容
+    return OpenAIChat(
+        id=llm.model,
+        api_key=llm.api_key,
+        base_url=llm.base_url,
+    )
+
+
 def build_agent() -> Agent:
     """构建并返回 Agent 实例"""
     skills = discover_skills(SKILLS_DIR)
     knowledge = build_knowledge()
-
-    model = OpenAIChat(
-        id=cfg.llm.model,
-        api_key=cfg.llm.api_key,
-        base_url=cfg.llm.base_url,
-    )
+    model = _build_model(cfg.llm)
 
     return Agent(
         model=model,

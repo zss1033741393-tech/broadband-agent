@@ -1,14 +1,25 @@
 # 复制此文件为 llm.yaml 并填入真实配置
 # configs/llm.yaml 已加入 .gitignore，不会提交到 git
 
-# DeepSeek
-api_key: "sk-xxx"
-base_url: "https://api.deepseek.com/v1"
-model: "deepseek-reasoner"   # 思考模式（R1）; deepseek-chat 为非思考模式
+# ── Anthropic Claude（原生集成，需 pip install anthropic）──────
+provider: "anthropic"
+api_key: "sk-ant-xxx"
+model: "claude-sonnet-4-5-20250929"   # 或 claude-opus-4-5 / claude-haiku-4-5
 temperature: 0.7
 max_tokens: 8192
 
-# OpenAI 兼容示例
+# ── DeepSeek（OpenAI 兼容接口）────────────────────────────────
+# provider: "openai"
+# api_key: "sk-xxx"
+# base_url: "https://api.deepseek.com/v1"
+# model: "deepseek-reasoner"   # 思考模式（R1）; deepseek-chat 为非思考模式
+# temperature: 0.7
+# max_tokens: 8192
+
+# ── OpenAI ────────────────────────────────────────────────────
+# provider: "openai"
 # api_key: "sk-xxx"
 # base_url: "https://api.openai.com/v1"
 # model: "gpt-4o"
+# temperature: 0.7
+# max_tokens: 4096

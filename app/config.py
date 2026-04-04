@@ -17,6 +17,7 @@ class LLMConfig(BaseModel):
     model: str = "gpt-4o"
     temperature: float = 0.7
     max_tokens: int = 4096
+    provider: str = "openai"  # openai（含 OpenAI 兼容接口）| anthropic
 
 
 class StorageConfig(BaseModel):
