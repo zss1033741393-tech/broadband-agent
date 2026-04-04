@@ -172,10 +172,17 @@ if __name__ == "__main__":
     device_id = _read_value("--device-id", 1, default="")
 
     try:
-        plans = json.loads(plans_json)
+        raw_plans = json.loads(plans_json)
     except json.JSONDecodeError:
         print(json.dumps({"error": "plans_json 格式错误"}, ensure_ascii=False))
         sys.exit(1)
+
+    # plans.json 落盘格式为 {"plans": [...list...], "rules": "..."}
+    # translate_all_plans 期望 {"template.json": {...plan_obj...}, ...} 格式
+    if isinstance(raw_plans, dict) and "plans" in raw_plans and isinstance(raw_plans["plans"], list):
+        plans = {item["template"]: item for item in raw_plans["plans"] if "template" in item}
+    else:
+        plans = raw_plans
 
     result = translate_all_plans(plans, device_id)
     schema = load_config_schema()

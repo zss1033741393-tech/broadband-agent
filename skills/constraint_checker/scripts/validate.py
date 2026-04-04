@@ -155,10 +155,17 @@ if __name__ == "__main__":
     intent_goal_json = _read_arg("--intent-file", 1)
 
     try:
-        plans = json.loads(plans_json)
+        raw_plans = json.loads(plans_json)
     except json.JSONDecodeError:
         print(json.dumps({"error": "plans_json 格式错误"}, ensure_ascii=False))
         sys.exit(1)
+
+    # plans.json 落盘格式为 {"plans": [...list...], "rules": "..."}
+    # run_all_checks 期望 {"template.json": {...plan_obj...}, ...} 格式
+    if isinstance(raw_plans, dict) and "plans" in raw_plans and isinstance(raw_plans["plans"], list):
+        plans = {item["template"]: item for item in raw_plans["plans"] if "template" in item}
+    else:
+        plans = raw_plans
 
     try:
         intent_goal = json.loads(intent_goal_json)
