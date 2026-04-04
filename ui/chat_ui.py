@@ -3,8 +3,7 @@
 通过 Agno agent.run(stream=True) 实现实时流式输出，
 用户在 Agent 调用 Skill、追问、生成方案过程中能看到逐步输出。
 
-挂载路径：/gradio（由 app/main.py 通过 gr.mount_gradio_app 挂载）
-独立启动：python ui/chat_ui.py（监听 7860 端口）
+独立启动：python ui/chat_ui.py（监听 7860 端口，与 AgentOS 进程分离）
 """
 from __future__ import annotations
 
@@ -14,6 +13,9 @@ import gradio as gr
 
 from agno.run.agent import RunEvent
 from app.agent.agent import get_agent
+from app.logger.setup import setup_logging
+
+setup_logging()
 
 
 def _stream_chat(message: str, history: list) -> Iterator[str]:

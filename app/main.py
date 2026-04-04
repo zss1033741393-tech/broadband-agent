@@ -18,6 +18,9 @@ from agno.os import AgentOS
 
 from app.agent.agent import get_agent
 from app.config import load_config
+from app.logger.setup import setup_logging
+
+setup_logging()
 
 _cfg = load_config()
 

@@ -182,13 +182,13 @@ def _build_model(llm: LLMConfig):
             api_key=llm.api_key,
         )
     # 默认：openai 兼容
-    # 覆盖 default_role_map：Agno 默认把 system 映射为 developer（跟 OpenAI o1 格式走），
+    # 覆盖 role_map：Agno 默认把 system 映射为 developer（跟 OpenAI o1 格式走），
     # 但大多数 OpenAI 兼容接口（qwen、本地模型等）只支持标准的 system role，需显式还原。
     return OpenAIChat(
         id=llm.model,
         api_key=llm.api_key,
         base_url=llm.base_url,
-        default_role_map={
+        role_map={
             "system": "system",
             "user": "user",
             "assistant": "assistant",
