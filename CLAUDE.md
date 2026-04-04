@@ -159,6 +159,15 @@ docs: 文档
 skill: Skills 变更（SKILL.md / scripts / references）
 ```
 
+**README 同步规则（重要）**：
+每次提交如果涉及以下内容，**必须同步更新 README.md**：
+- 新增或删除功能模块（如新增 OutputSink、新增 API 端点）
+- 流程或架构变更（如 Agent 决策流程、Skills 机制变化）
+- 项目结构变化（如新增目录 `app/outputs/`）
+- 配置参数变更（如新增 `tool_hooks`、修改 pipeline 参数）
+
+README 不需要因为 bug fix、测试补充、注释修改而更新。
+
 - **push 规则（重要）**：
   - 必须使用 `git push -u origin <branch>` 通过 PAT URL 直接推送
   - **严禁使用 GitHub MCP Server 工具（mcp__github__push_files 等）提交代码**，速度极慢

@@ -46,8 +46,10 @@ broadband-agent/
 ├── app/
 │   ├── main.py               # AgentOS 入口 + Gradio 挂载
 │   ├── config.py             # YAML 配置加载（Pydantic）
-│   └── agent/
-│       └── agent.py          # Agent 定义：discover_skills / build_knowledge / build_agent
+│   ├── agent/
+│   │   └── agent.py          # Agent 定义：discover_skills / build_knowledge / build_agent
+│   └── outputs/
+│       └── sink.py           # OutputSink：tool_hook 拦截脚本结果，按 session 写文件
 ├── skills/                   # 自包含 Skills（自动扫描）
 │   ├── intent_parser/        # 意图解析与追问
 │   ├── user_profiler/        # 用户画像补全
@@ -60,9 +62,20 @@ broadband-agent/
 ├── data/                     # 运行时数据（.gitignore 排除）
 │   ├── agent.db              # SQLite 会话存储
 │   └── lancedb/              # LanceDB 向量存储
+├── outputs/                  # 阶段产出物（运行时，.gitignore 排除）
+│   └── {session_id}/
+│       ├── intent.json       # 意图解析结果
+│       ├── profile.json      # 用户画像
+│       ├── plans.json        # 五大方案
+│       ├── constraint.json   # 约束校验结果
+│       └── configs.json      # 设备配置（下游系统消费此文件）
+├── data/                     # 运行时数据（.gitignore 排除）
+│   ├── agent.db              # SQLite 会话存储
+│   └── lancedb/              # LanceDB 向量存储
 ├── tests/
 │   ├── test_agent/           # Agent 初始化 + 流式事件 + Skills 发现测试
-│   └── test_skills/          # 各 Skill 脚本逻辑测试
+│   ├── test_skills/          # 各 Skill 脚本逻辑测试
+│   └── test_outputs/         # OutputSink 测试
 └── pyproject.toml
 ```
 
@@ -165,6 +178,26 @@ skills/{skill_name}/
   → 输出 perception/closure/optimization/diagnosis 四类配置
   → 展示摘要 + 回退方案
 ```
+
+## 阶段产出物持久化
+
+每个阶段脚本执行完毕后，`OutputSink`（`app/outputs/sink.py`）通过 Agno `tool_hooks` 机制自动将结果写入：
+
+```
+outputs/{session_id}/{stage}.json
+```
+
+**机制**：hook 纯观测，`run_context.session_id` 由框架注入，Skills 脚本零感知。
+
+**下游对接**：数据仿真系统读取 `outputs/{session_id}/configs.json` 获取设备配置，执行完成后交由报告 Agent 生成智能报告。
+
+| 文件 | 来源脚本 | 内容 |
+|------|---------|------|
+| `intent.json` | `extract.py` | 结构化意图目标 |
+| `profile.json` | `query_profile.py` | 用户画像 |
+| `plans.json` | `generate.py` | 五大方案填充结果 |
+| `constraint.json` | `validate.py` | 约束校验结果（重试时覆盖） |
+| `configs.json` | `translate.py` | 设备下发配置（下游消费） |
 
 ## 配置参数
 
