@@ -57,6 +57,26 @@ def discover_skills(skills_dir: Path) -> Skills:
 # domain_expert/references/ 中的文本类知识灌入向量库
 # ─────────────────────────────────────────────────────────────
 
+def _build_embedder():
+    """按 provider 选择嵌入器
+
+    openai / openai 兼容：OpenAILikeEmbedder，复用 llm.yaml 的 base_url + api_key
+    anthropic：FastEmbedEmbedder（本地推理，无需 API key）
+      需要安装：pip install fastembed
+      首次运行自动下载模型（~100MB），之后离线可用
+    """
+    if cfg.llm.provider == "anthropic":
+        from agno.knowledge.embedder.fastembed import FastEmbedEmbedder
+        return FastEmbedEmbedder()
+    # openai 兼容：复用 LLM 的 base_url（DeepSeek / OpenAI 均支持 embeddings 端点）
+    from agno.knowledge.embedder.openai_like import OpenAILikeEmbedder
+    return OpenAILikeEmbedder(
+        id="text-embedding-3-small",
+        api_key=cfg.llm.api_key,
+        base_url=cfg.llm.base_url,
+    )
+
+
 def build_knowledge() -> Knowledge | None:
     """构建 LanceDB Knowledge，灌入 domain_expert/references/ 中的文本类文档
 
@@ -64,9 +84,11 @@ def build_knowledge() -> Knowledge | None:
     避免重启时重复写入。
     """
     try:
+        embedder = _build_embedder()
         lancedb = LanceDb(
             uri=cfg.storage.lancedb_uri,
             table_name=cfg.storage.lancedb_table,
+            embedder=embedder,
         )
         knowledge = Knowledge(vector_db=lancedb)
 

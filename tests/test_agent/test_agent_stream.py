@@ -92,12 +92,12 @@ class TestAgentInit:
             "_build_agno_tools 不应存在，技能通过 LocalSkills 元工具原生执行"
 
     def test_agent_uses_openai_chat(self) -> None:
-        """agent.py 应使用 OpenAIChat 而非 OpenAILike"""
+        """LLM 模型应使用 OpenAIChat（openai provider），不用 OpenAILike 作为模型类"""
         import app.agent.agent as agent_module
         import inspect
-        src = inspect.getsource(agent_module)
-        assert "OpenAIChat" in src, "应使用 OpenAIChat"
-        assert "OpenAILike" not in src, "不应使用 OpenAILike"
+        src = inspect.getsource(agent_module._build_model)
+        assert "OpenAIChat" in src, "openai provider 应使用 OpenAIChat"
+        assert "OpenAILike" not in src, "模型层不应使用 OpenAILike（嵌入器层另行处理）"
 
     def test_system_prompt_no_hardcoded_skill_names(self) -> None:
         """SYSTEM_PROMPT 不应硬编码具体技能名（如 intent_parser）"""

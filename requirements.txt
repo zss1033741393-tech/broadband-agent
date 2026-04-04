@@ -1,0 +1,28 @@
+# 家宽体验感知优化 Agent — 依赖清单
+# 生成时参考版本: agno==2.5.14, lancedb==0.30.2, anthropic==0.89.0
+# 安装命令: pip install -r requirements.txt
+
+# ── 核心框架 ─────────────────────────────────────────────────
+agno==2.5.14
+
+# ── LLM 提供商 SDK ───────────────────────────────────────────
+openai>=1.50            # OpenAI / DeepSeek / 任何兼容接口
+anthropic>=0.40         # Anthropic Claude（provider=anthropic 时需要）
+
+# ── Web 服务 ──────────────────────────────────────────────────
+fastapi>=0.115
+uvicorn[standard]>=0.30
+gradio>=4.0             # 调试界面（4.x 和 5.x 均兼容）
+
+# ── 数据持久化 ────────────────────────────────────────────────
+lancedb>=0.12           # 向量存储（Knowledge RAG）
+aiosqlite>=0.20         # SQLite 异步驱动
+
+# ── 嵌入器（Knowledge RAG 必需，二选一）─────────────────────
+# openai 兼容 provider：无需额外安装，复用 openai 包
+# anthropic provider：本地嵌入，首次运行自动下载模型（约 100MB）
+fastembed>=0.3          # provider=anthropic 时使用
+
+# ── 基础工具 ──────────────────────────────────────────────────
+pydantic>=2.0
+pyyaml>=6.0

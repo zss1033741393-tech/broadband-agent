@@ -62,8 +62,6 @@ def create_ui() -> gr.ChatInterface:
             "帮我优化家里的网络，最近打游戏延迟很高",
             "视频会议老是卡，主要用腾讯会议，工作时间 9-18 点",
         ],
-        theme=gr.themes.Soft(),
-        type="messages",
     )
 
 
