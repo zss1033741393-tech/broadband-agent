@@ -4,10 +4,7 @@ from __future__ import annotations
 from agno.agent import Agent
 from agno.skills import LocalSkills, Skills
 
-from app.config import load_config
 from .tools import get_pipeline_file, SKILLS_DIR
-
-cfg = load_config()
 
 PLAN_PROMPT = """\
 你是方案生成专家。处理流程：
@@ -19,7 +16,7 @@ PLAN_PROMPT = """\
 """
 
 
-def build_plan_agent(model) -> Agent:
+def build_plan_agent(model, num_history_runs: int, debug_mode: bool) -> Agent:
     skills = Skills(loaders=[
         LocalSkills(path=str(SKILLS_DIR / "plan_generator"), validate=False),
     ])
@@ -31,7 +28,7 @@ def build_plan_agent(model) -> Agent:
         tools=[get_pipeline_file],
         instructions=PLAN_PROMPT,
         add_history_to_context=True,
-        num_history_runs=2,
+        num_history_runs=num_history_runs,
         markdown=True,
-        debug_mode=cfg.pipeline.debug_mode,
+        debug_mode=debug_mode,
     )

@@ -4,10 +4,7 @@ from __future__ import annotations
 from agno.agent import Agent
 from agno.skills import LocalSkills, Skills
 
-from app.config import load_config
 from .tools import get_pipeline_file, check_constraints, SKILLS_DIR
-
-cfg = load_config()
 
 CONSTRAINT_PROMPT = """\
 你是约束校验专家。处理流程：
@@ -21,7 +18,7 @@ CONSTRAINT_PROMPT = """\
 """
 
 
-def build_constraint_agent(model) -> Agent:
+def build_constraint_agent(model, num_history_runs: int, debug_mode: bool) -> Agent:
     skills = Skills(loaders=[
         LocalSkills(path=str(SKILLS_DIR / "constraint_checker"), validate=False),
     ])
@@ -33,7 +30,7 @@ def build_constraint_agent(model) -> Agent:
         tools=[get_pipeline_file, check_constraints],
         instructions=CONSTRAINT_PROMPT,
         add_history_to_context=True,
-        num_history_runs=2,
+        num_history_runs=num_history_runs,
         markdown=True,
-        debug_mode=cfg.pipeline.debug_mode,
+        debug_mode=debug_mode,
     )

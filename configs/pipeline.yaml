@@ -1,11 +1,24 @@
 pipeline:
   max_turns: 15
   max_retry_on_constraint_fail: 3
-  num_history_runs: 4
+  num_history_runs: 4           # 主控 OrchestratorTeam 的历史轮数
   skills_dir: "./skills"
   debug_mode: true
   clarification_max_rounds: 3
   clarification_max_fields_per_round: 3
+  agents:
+    intent:
+      num_history_runs: 4
+      model: ~                  # null = 继承 llm.yaml 中的模型
+    plan:
+      num_history_runs: 2
+      model: ~
+    constraint:
+      num_history_runs: 2
+      model: ~
+    config:
+      num_history_runs: 1
+      model: ~
 
 storage:
   sqlite_db_path: "./data/agent.db"

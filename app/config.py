@@ -30,10 +30,24 @@ class StorageConfig(BaseModel):
     lancedb_table: str = "domain_knowledge"
 
 
+class AgentConfig(BaseModel):
+    """单个子 Agent 的运行参数"""
+    num_history_runs: int
+    model: Optional[str] = None  # None = 继承主控 llm.yaml 中的模型
+
+
+class AgentsConfig(BaseModel):
+    """四个子 Agent 的独立配置，支持各自使用不同模型和历史轮数"""
+    intent: AgentConfig = AgentConfig(num_history_runs=4)
+    plan: AgentConfig = AgentConfig(num_history_runs=2)
+    constraint: AgentConfig = AgentConfig(num_history_runs=2)
+    config: AgentConfig = AgentConfig(num_history_runs=1)
+
+
 class PipelineConfig(BaseModel):
     max_turns: int = 15
     max_retry_on_constraint_fail: int = 3
-    num_history_runs: int = 10
+    num_history_runs: int = 4  # 主控 OrchestratorTeam 的历史轮数
     skills_dir: str = "./skills"
     debug_mode: bool = True
     clarification_max_rounds: int = 3
@@ -41,6 +55,7 @@ class PipelineConfig(BaseModel):
     # 预留扩展开关：True 时切换为 LLM 实现，False 时使用规则引擎（当前原型）
     use_llm_constraint: bool = False
     use_llm_translation: bool = False
+    agents: AgentsConfig = AgentsConfig()
 
 
 class AppConfig(BaseModel):

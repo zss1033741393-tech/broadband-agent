@@ -4,10 +4,7 @@ from __future__ import annotations
 from agno.agent import Agent
 from agno.skills import LocalSkills, Skills
 
-from app.config import load_config
 from .tools import get_pipeline_file, translate_configs, SKILLS_DIR
-
-cfg = load_config()
 
 CONFIG_PROMPT = """\
 你是配置转译专家。处理流程：
@@ -20,7 +17,7 @@ CONFIG_PROMPT = """\
 """
 
 
-def build_config_agent(model) -> Agent:
+def build_config_agent(model, num_history_runs: int, debug_mode: bool) -> Agent:
     skills = Skills(loaders=[
         LocalSkills(path=str(SKILLS_DIR / "config_translator"), validate=False),
     ])
@@ -32,7 +29,7 @@ def build_config_agent(model) -> Agent:
         tools=[get_pipeline_file, translate_configs],
         instructions=CONFIG_PROMPT,
         add_history_to_context=True,
-        num_history_runs=1,
+        num_history_runs=num_history_runs,
         markdown=True,
-        debug_mode=cfg.pipeline.debug_mode,
+        debug_mode=debug_mode,
     )

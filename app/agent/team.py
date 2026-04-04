@@ -49,13 +49,14 @@ ORCHESTRATOR_PROMPT = """\
 """
 
 
-def _build_model(llm: LLMConfig):
-    """按 provider 选择模型"""
+def _build_model(llm: LLMConfig, model_id: str | None = None):
+    """按 provider 选择模型；model_id 非 None 时覆盖 llm.model"""
+    actual_model = model_id or llm.model
     if llm.provider == "anthropic":
         from agno.models.anthropic.claude import Claude
-        return Claude(id=llm.model, api_key=llm.api_key)
+        return Claude(id=actual_model, api_key=llm.api_key)
     return OpenAIChat(
-        id=llm.model,
+        id=actual_model,
         api_key=llm.api_key,
         base_url=llm.base_url,
         role_map={
@@ -103,19 +104,38 @@ def build_knowledge() -> Knowledge | None:
 
 def build_team() -> Team:
     """构建并返回 OrchestratorTeam 实例"""
-    model = _build_model(cfg.llm)
+    agents_cfg = cfg.pipeline.agents
+    debug_mode = cfg.pipeline.debug_mode
+
+    orchestrator_model = _build_model(cfg.llm)
     knowledge = build_knowledge()
 
-    intent_agent = build_intent_agent(model)
-    plan_agent = build_plan_agent(model)
-    constraint_agent = build_constraint_agent(model)
-    config_agent = build_config_agent(model)
+    intent_agent = build_intent_agent(
+        model=_build_model(cfg.llm, agents_cfg.intent.model),
+        num_history_runs=agents_cfg.intent.num_history_runs,
+        debug_mode=debug_mode,
+    )
+    plan_agent = build_plan_agent(
+        model=_build_model(cfg.llm, agents_cfg.plan.model),
+        num_history_runs=agents_cfg.plan.num_history_runs,
+        debug_mode=debug_mode,
+    )
+    constraint_agent = build_constraint_agent(
+        model=_build_model(cfg.llm, agents_cfg.constraint.model),
+        num_history_runs=agents_cfg.constraint.num_history_runs,
+        debug_mode=debug_mode,
+    )
+    config_agent = build_config_agent(
+        model=_build_model(cfg.llm, agents_cfg.config.model),
+        num_history_runs=agents_cfg.config.num_history_runs,
+        debug_mode=debug_mode,
+    )
 
     return Team(
         name="宽带优化团队",
         members=[intent_agent, plan_agent, constraint_agent, config_agent],
         mode=TeamMode.coordinate,
-        model=model,
+        model=orchestrator_model,
         knowledge=knowledge,
         instructions=ORCHESTRATOR_PROMPT,
         add_history_to_context=True,
