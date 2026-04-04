@@ -211,6 +211,9 @@ design.md
 *_design.md
 docs/design/
 
+# UV lock file（不提交，依赖 pyproject.toml 管理）
+uv.lock
+
 # 运行时数据（SQLite + LanceDB 向量存储）
 data/
 logs/
