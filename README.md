@@ -84,8 +84,10 @@ broadband-agent/
 ### 1. 安装依赖
 
 ```bash
-pip install "agno>=2.5.14,<3.0" lancedb gradio pyyaml aiosqlite openai
-# 或直接从 pyproject.toml 安装
+# 推荐：用 uv 安装（自动读取 uv.lock 精确版本）
+uv sync
+
+# 或 pip 安装
 pip install -e .
 ```
 
@@ -107,14 +109,16 @@ max_tokens: 4096
 uvicorn app.main:app --reload --port 8000
 ```
 
-- AgentOS UI（trace 可视化）：http://localhost:8000
-- Gradio 调试界面：http://localhost:8000/gradio
-- API 文档：http://localhost:8000/docs
+| 端点 | 说明 |
+|------|------|
+| http://localhost:8000/ | AgentOS API 信息（JSON） |
+| http://localhost:8000/docs | Swagger API 文档 |
+| http://localhost:8000/gradio | Gradio 对话调试界面 |
 
 ### 4. 运行测试
 
 ```bash
-pytest tests/ -v          # 37 个测试全部通过
+pytest tests/ -v          # 47 个测试全部通过
 ruff check --fix . && ruff format .
 ```
 
