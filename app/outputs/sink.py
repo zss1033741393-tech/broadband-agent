@@ -11,8 +11,7 @@
 输出结构：
   outputs/
   └── {session_id}/
-      ├── intent.json       ← intent_parser/scripts/extract.py
-      ├── profile.json      ← user_profiler/scripts/query_profile.py
+      ├── intent.json       ← intent_profiler/scripts/analyze.py
       ├── plans.json        ← plan_generator/scripts/generate.py
       ├── constraint.json   ← constraint_checker/scripts/validate.py
       └── configs.json      ← config_translator/scripts/translate.py
@@ -28,8 +27,7 @@ logger = logging.getLogger("outputs.sink")
 
 # 脚本文件名 → 阶段名映射
 _SCRIPT_TO_STAGE: dict[str, str] = {
-    "extract.py": "intent",
-    "query_profile.py": "profile",
+    "analyze.py": "intent",
     "generate.py": "plans",
     "validate.py": "constraint",
     "translate.py": "configs",

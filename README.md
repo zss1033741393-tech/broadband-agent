@@ -14,10 +14,10 @@
   ▼
 OrchestratorTeam ──────────────────────────────────────────┐
   │ 委托给                                                   │
-  ├─ IntentAgent   (intent_parser + user_profiler Skills)   │ context
-  ├─ PlanAgent     (plan_generator Skill)                   │ 独立
-  ├─ ConstraintAgent (constraint_checker Skill)             │
-  └─ ConfigAgent   (config_translator Skill)                │
+  ├─ IntentAgent     (intent_profiler + domain_expert)       │ context
+  ├─ PlanAgent       (plan_generator + domain_expert)       │ 独立
+  ├─ ConstraintAgent (constraint_checker + domain_expert)   │
+  └─ ConfigAgent     (config_translator + domain_expert)    │
          │                                                   │
          └→ stdout JSON / 直接 Python 工具 → 产出写入 outputs/
 ```
@@ -59,13 +59,12 @@ broadband-agent/
 │   │   └── agent.py          # 向后兼容包装，get_agent() → get_team()
 │   └── outputs/
 │       └── sink.py           # OutputSink：tool_hook 拦截脚本结果，按 session 写文件
-├── skills/                   # 自包含 Skills（自动扫描）
-│   ├── intent_parser/        # 意图解析与追问
-│   ├── user_profiler/        # 用户画像补全
-│   ├── plan_generator/       # 五大方案模板填充
-│   ├── constraint_checker/   # 约束校验（强制步骤）
-│   ├── config_translator/    # NL2JSON 配置转译
-│   └── domain_expert/        # 领域知识库（CEI指标/设备能力/术语表，下沉至子Agent）
+├── skills/                   # 自包含 Skills（自动扫描，ADK 设计范式）
+│   ├── intent_profiler/      # 【Inversion】意图解析 + 画像推断补全（合并）
+│   ├── plan_generator/       # 【Generator】五大方案模板填充
+│   ├── constraint_checker/   # 【Reviewer】约束校验（强制步骤）
+│   ├── config_translator/    # 【Pipeline】NL2JSON 配置转译
+│   └── domain_expert/        # 【Tool Wrapper】领域知识库（下沉至全部子Agent）
 ├── ui/
 │   └── chat_ui.py            # Gradio 调试界面（结构化活动日志）
 ├── data/                     # 运行时数据（.gitignore 排除）
@@ -73,8 +72,7 @@ broadband-agent/
 │   └── lancedb/              # LanceDB 向量存储
 ├── outputs/                  # 阶段产出物（运行时，.gitignore 排除）
 │   └── {session_id}/
-│       ├── intent.json       # 意图解析结果
-│       ├── profile.json      # 用户画像
+│       ├── intent.json       # 意图 + 画像（合并）
 │       ├── plans.json        # 五大方案
 │       ├── constraint.json   # 约束校验结果
 │       └── configs.json      # 设备配置（下游系统消费此文件）
@@ -145,10 +143,10 @@ ruff check --fix . && ruff format .
 
 | 子 Agent | Skills | 职责 | num_history_runs |
 |----------|--------|------|-----------------|
-| `IntentAgent` | intent_parser + user_profiler | 解析意图 + 追问 + 补全画像 | 4 |
-| `PlanAgent` | plan_generator | 填充五大方案模板 | 2 |
-| `ConstraintAgent` | constraint_checker | 校验性能/组网/冲突约束 | 2 |
-| `ConfigAgent` | config_translator | 转译 4 类设备配置 | 1 |
+| `IntentAgent` | intent_profiler + domain_expert | 意图提取 + 画像推断补全 + 追问 | 4 |
+| `PlanAgent` | plan_generator + domain_expert | 填充五大方案模板 | 2 |
+| `ConstraintAgent` | constraint_checker + domain_expert | 校验性能/组网/冲突约束 | 2 |
+| `ConfigAgent` | config_translator + domain_expert | 转译 4 类设备配置 | 1 |
 | `OrchestratorTeam` | — | 路由委托、汇总结果、用户交互 | 4 |
 
 ### 直接 Python 工具（无 subprocess 开销）
@@ -163,10 +161,10 @@ ConstraintAgent 和 ConfigAgent 注册了直接 Python 函数工具，绕过 sub
 ### 决策流程
 
 ```
-阶段1 目标解析+追问（IntentAgent）
-  intent_parser/extract.py + user_profiler/query_profile.py
+阶段1 意图解析+画像补全（IntentAgent）
+  intent_profiler/analyze.py（一次性完成提取+推断+校验）
   → complete=false → 追问（最多3轮）→ complete=true
-  → 产出：intent.json + profile.json
+  → 产出：intent.json（含意图+画像）
 
 阶段2 生成方案（PlanAgent）
   plan_generator/generate.py
@@ -211,14 +209,13 @@ skills/{skill_name}/
 
 ### Skill 列表
 
-| Skill | 脚本 | 功能 |
-|-------|------|------|
-| `intent_parser` | `extract.py` | 解析用户自然语言意图，校验完整性，生成追问 |
-| `user_profiler` | `query_profile.py` | 查询用户历史画像，补全缺失字段 |
-| `plan_generator` | `generate.py` | 基于意图目标并行填充五大优化方案模板 |
-| `constraint_checker` | `validate.py` | 校验方案的性能约束、组网约束、策略冲突（**强制步骤**） |
-| `config_translator` | `translate.py` | 将语义方案转译为设备可下发的配置（NL2JSON） |
-| `domain_expert` | 无脚本 | 领域知识库（CEI指标/设备能力矩阵/术语表），通过 `get_skill_reference` 按需加载，已下沉至全部4个子Agent |
+| Skill | ADK 模式 | 脚本 | 功能 |
+|-------|---------|------|------|
+| `intent_profiler` | Inversion | `analyze.py` | 意图提取 + 画像推断补全 + 追问生成（合并原 intent_parser + user_profiler） |
+| `plan_generator` | Generator | `generate.py` | 基于意图目标并行填充五大优化方案模板 |
+| `constraint_checker` | Reviewer | `validate.py` | 校验方案的性能约束、组网约束、策略冲突（**强制步骤**） |
+| `config_translator` | Pipeline | `translate.py` | 将语义方案转译为设备可下发的配置（NL2JSON） |
+| `domain_expert` | Tool Wrapper | 无脚本 | 领域知识库（CEI指标/设备能力矩阵/术语表），下沉至全部4个子Agent |
 
 ## 阶段产出物持久化
 
@@ -234,8 +231,7 @@ outputs/{session_id}/{stage}.json
 
 | 文件 | 来源 | 内容 |
 |------|------|------|
-| `intent.json` | `extract.py` | 结构化意图目标 |
-| `profile.json` | `query_profile.py` | 用户画像 |
+| `intent.json` | `analyze.py` | 结构化意图 + 用户画像（合并） |
 | `plans.json` | `generate.py` | 五大方案填充结果 |
 | `constraint.json` | `validate.py` | 约束校验结果（重试时覆盖） |
 | `configs.json` | `translate.py` | 设备下发配置（下游消费） |

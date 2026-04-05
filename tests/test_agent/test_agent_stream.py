@@ -72,7 +72,7 @@ class TestAgentInit:
         from app.agent.agent import discover_skills, SKILLS_DIR
         skills = discover_skills(SKILLS_DIR)
         names = skills.get_skill_names()
-        for expected in ["intent_parser", "user_profiler", "plan_generator",
+        for expected in ["intent_profiler", "plan_generator",
                          "constraint_checker", "config_translator", "domain_expert"]:
             assert expected in names, f"Skill '{expected}' 未被发现"
 
@@ -104,7 +104,7 @@ class TestAgentInit:
         from app.agent.agent import SYSTEM_PROMPT
         # 技能名列表由 <skills_system> 动态注入，prompt 只描述流程
         hardcoded = [
-            "intent_parser:", "user_profiler:", "plan_generator:",
+            "intent_profiler:", "plan_generator:",
             "constraint_checker:", "config_translator:", "domain_expert:",
         ]
         for name in hardcoded:
@@ -152,13 +152,13 @@ async def test_stream_skill_tool_call_sequence(mock_agno_agent) -> None:
     """Skills 元工具调用事件序列应完整传递"""
     fake_events = [
         _make_event(RunEvent.tool_call_started.value,
-                    tool=_make_tool_exec("get_skill_instructions", {"skill_name": "intent_parser"})),
+                    tool=_make_tool_exec("get_skill_instructions", {"skill_name": "intent_profiler"})),
         _make_event(RunEvent.tool_call_completed.value,
                     tool=_make_tool_exec("get_skill_instructions", {}, result="[instructions text]")),
         _make_event(RunEvent.tool_call_started.value,
                     tool=_make_tool_exec("get_skill_script",
-                                         {"skill_name": "intent_parser",
-                                          "script_path": "extract.py",
+                                         {"skill_name": "intent_profiler",
+                                          "script_path": "analyze.py",
                                           "execute": True,
                                           "args": ["{}"]},
                                          )),

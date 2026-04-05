@@ -54,7 +54,7 @@ class TestOutputSinkHook:
         output_sink_hook(
             name="get_skill_script",
             func=_make_next_func(_skill_script_result(payload)),
-            args={"script_path": "extract.py", "execute": True},
+            args={"script_path": "analyze.py", "execute": True},
             run_context=ctx,
         )
 
@@ -80,12 +80,11 @@ class TestOutputSinkHook:
         assert data["success"] is True
 
     def test_all_stage_scripts_mapped(self, tmp_path, monkeypatch):
-        """五个阶段脚本都能正确写入对应文件名"""
+        """四个阶段脚本都能正确写入对应文件名"""
         monkeypatch.chdir(tmp_path)
         ctx = _FakeRunContext(session_id="sess-all")
         stage_scripts = {
-            "extract.py": "intent",
-            "query_profile.py": "profile",
+            "analyze.py": "intent",
             "generate.py": "plans",
             "validate.py": "constraint",
             "translate.py": "configs",
@@ -109,7 +108,7 @@ class TestOutputSinkHook:
         result = output_sink_hook(
             name="get_skill_instructions",
             func=_make_next_func(sentinel),
-            args={"skill_name": "intent_parser"},
+            args={"skill_name": "intent_profiler"},
             run_context=ctx,
         )
 
@@ -124,7 +123,7 @@ class TestOutputSinkHook:
         output_sink_hook(
             name="get_skill_script",
             func=_make_next_func("script content"),
-            args={"script_path": "extract.py", "execute": False},
+            args={"script_path": "analyze.py", "execute": False},
             run_context=ctx,
         )
 
@@ -152,7 +151,7 @@ class TestOutputSinkHook:
         output_sink_hook(
             name="get_skill_script",
             func=_make_next_func("not valid json at all"),
-            args={"script_path": "extract.py", "execute": True},
+            args={"script_path": "analyze.py", "execute": True},
             run_context=ctx,
         )
 
@@ -166,7 +165,7 @@ class TestOutputSinkHook:
         output_sink_hook(
             name="get_skill_script",
             func=_make_next_func(_skill_script_result(payload)),
-            args={"script_path": "extract.py", "execute": True},
+            args={"script_path": "analyze.py", "execute": True},
             run_context=None,
         )
 
@@ -181,7 +180,7 @@ class TestOutputSinkHook:
         result = output_sink_hook(
             name="get_skill_script",
             func=_make_next_func(original),
-            args={"script_path": "extract.py", "execute": True},
+            args={"script_path": "analyze.py", "execute": True},
             run_context=ctx,
         )
 

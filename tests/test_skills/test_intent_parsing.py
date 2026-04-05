@@ -1,4 +1,4 @@
-"""意图解析 Skill 单元测试"""
+"""intent_profiler Skill 单元测试（合并后的意图解析+画像补全）"""
 import sys
 from pathlib import Path
 
@@ -6,18 +6,28 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from skills.intent_parser.scripts.extract import (
+from skills.intent_profiler.scripts.analyze import (
     generate_followup_questions,
     load_intent_schema,
+    load_profile_template,
+    merge_intent_with_profile,
     validate_intent,
+    check_profile_missing,
+    infer_from_app_history,
 )
-from skills.user_profiler.scripts.query_profile import merge_intent_with_profile
 
 
 def test_load_intent_schema() -> None:
     schema = load_intent_schema()
     assert "intent_goal" in schema
     assert "required_fields" in schema
+
+
+def test_load_profile_template() -> None:
+    template = load_profile_template()
+    assert "user_profile" in template
+    assert "application_history" in template
+    assert "network_kpi" in template
 
 
 def test_validate_intent_complete() -> None:
@@ -50,3 +60,25 @@ def test_merge_intent_with_profile() -> None:
     merged = merge_intent_with_profile(intent, profile)
     assert merged["user_type"] == "游戏用户"
     assert merged["scenario"] == "低延迟保障"  # 非空字段不被覆盖
+
+
+def test_check_profile_missing_all_empty() -> None:
+    profile = {"user_profile": {"user_type": "", "scenario": "", "guarantee_period": {}}}
+    missing = check_profile_missing(profile)
+    assert "user_type" in missing
+    assert "scenario" in missing
+    assert "guarantee_period" in missing
+
+
+def test_infer_from_app_history_live() -> None:
+    profile = load_profile_template()
+    result = infer_from_app_history(profile, ["OBS Studio", "抖音直播伴侣"])
+    assert result["user_profile"]["user_type"] == "直播用户"
+    assert result["user_profile"]["core_metrics"]["bandwidth_priority"] is True
+
+
+def test_infer_from_app_history_game() -> None:
+    profile = load_profile_template()
+    result = infer_from_app_history(profile, ["Steam", "英雄联盟"])
+    assert result["user_profile"]["user_type"] == "游戏用户"
+    assert result["user_profile"]["core_metrics"]["latency_sensitive"] is True

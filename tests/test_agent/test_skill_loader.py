@@ -31,7 +31,7 @@ class TestDiscoverSkills:
         from app.agent.agent import discover_skills, SKILLS_DIR
         skills = discover_skills(SKILLS_DIR)
         names = skills.get_skill_names()
-        for expected in ["intent_parser", "user_profiler", "plan_generator",
+        for expected in ["intent_profiler", "plan_generator",
                          "constraint_checker", "config_translator", "domain_expert"]:
             assert expected in names, f"Skill '{expected}' 未被发现"
 
@@ -80,30 +80,25 @@ class TestScriptCLIEntryPoints:
         assert result.returncode == 0, f"脚本 {script_path.name} 返回码非零: {result.stderr}"
         return json.loads(result.stdout)
 
-    def test_extract_cli_empty_intent(self) -> None:
-        """extract.py CLI：空意图应返回 complete=false"""
-        data = self._run_script(SKILLS_DIR / "intent_parser/scripts/extract.py", "{}")
+    def test_analyze_cli_empty_intent(self) -> None:
+        """analyze.py CLI：空意图应返回 complete=false"""
+        data = self._run_script(SKILLS_DIR / "intent_profiler/scripts/analyze.py", "{}")
         assert "complete" in data
         assert "missing_fields" in data
+        assert "intent_goal" in data
+        assert "profile" in data
         assert "schema" in data
         assert data["complete"] is False
 
-    def test_extract_cli_complete_intent(self) -> None:
-        """extract.py CLI：完整意图应返回 complete=true"""
+    def test_analyze_cli_complete_intent(self) -> None:
+        """analyze.py CLI：完整意图应返回 complete=true"""
         intent = {"user_type": "直播用户", "scenario": "上行带宽保障",
                   "guarantee_target": {"priority_level": "high"}}
         data = self._run_script(
-            SKILLS_DIR / "intent_parser/scripts/extract.py",
+            SKILLS_DIR / "intent_profiler/scripts/analyze.py",
             json.dumps(intent)
         )
         assert data["complete"] is True
-
-    def test_query_profile_cli(self) -> None:
-        """query_profile.py CLI：应返回画像模板和缺失字段"""
-        data = self._run_script(SKILLS_DIR / "user_profiler/scripts/query_profile.py", "{}")
-        assert "template" in data
-        assert "missing_fields" in data
-        assert "field_rules" in data
 
     def test_generate_cli(self) -> None:
         """generate.py CLI：应返回 5 个方案填充结果"""
