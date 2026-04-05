@@ -199,7 +199,7 @@ async def _stream_chat(message: str, history: list) -> AsyncIterator[str]:
     has_yielded = False
 
     try:
-        async for event in await team.arun(message, stream=True):
+        async for event in team.arun(message, stream=True, stream_events=True):
             event_type = getattr(event, "event", None)
             tool = getattr(event, "tool", None)
 
