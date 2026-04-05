@@ -1,41 +1,35 @@
 ---
 name: domain_expert
 description: >
-  家宽领域专业知识。包含 CEI 指标定义、设备型号能力矩阵、术语表。
-  当 Agent 需要理解专业概念、查询设备能力、或解释术语时使用此 Skill。
-  此 Skill 仅提供参考资料，无执行脚本。领域知识已灌入 Knowledge RAG，
-  优先使用 knowledge 检索，其次使用 get_skill_reference 读取文件。
+  【Tool Wrapper 模式】家宽 CEI 领域知识库。无执行脚本，仅提供参考资料。
+  触发条件：需要查询 CEI 指标阈值（延迟/抖动/丢包告警值）、
+  设备型号能力矩阵（某型号是否支持某功能）、或解释专业术语时。
+  其他 Skill 执行过程中如需领域辅助判断，直接调用本 Skill 的资源文件。
 ---
 
-# 领域知识
-
-## 何时使用
-- 其他 Skill 执行中需要领域知识辅助判断
-- 用户询问专业术语含义
-- 需要查询设备型号支持哪些功能
-- 需要了解 CEI 指标计算方法
-
-## 如何查询
-
-**优先**：使用 knowledge 语义检索（已向量化）
-
-```
-search_knowledge("CEI 延迟指标计算方法")
-search_knowledge("华为 AX3 Pro 设备能力")
-```
-
-**备选**：直接读取参考文件
-
-```
-get_skill_reference("domain_expert", "cei_metrics.md")
-get_skill_reference("domain_expert", "glossary.md")
-get_skill_reference("domain_expert", "device_capabilities.json")
-```
+# 领域知识库
 
 ## 资源清单
-- `references/cei_metrics.md` — CEI 体验指标定义、计算方法、阈值范围
-- `references/device_capabilities.json` — 设备型号能力矩阵（型号/纳管/版本/功能支持）
-- `references/glossary.md` — 术语表（CEI / NMS / NCE / APPflow 等）
+
+| 文件 | 内容 | 适用场景 |
+|------|------|---------|
+| `cei_metrics.md` | CEI 指标定义、阈值范围、计算公式（延迟/抖动/丢包/带宽利用率） | PlanAgent 填充参数时判断阈值合理性 |
+| `device_capabilities.json` | 设备型号能力矩阵（型号/纳管/版本/功能支持） | ConstraintAgent 校验硬件约束；ConfigAgent 确认设备支持 |
+| `glossary.md` | 术语表（CEI/NCE/ONT/QoS/RTT 等） | IntentAgent 理解用户描述中的专业词汇 |
+
+## 如何使用
+
+```
+# 查询 CEI 指标阈值
+get_skill_reference("domain_expert", "cei_metrics.md")
+
+# 查询设备型号能力
+get_skill_reference("domain_expert", "device_capabilities.json")
+
+# 查询术语含义
+get_skill_reference("domain_expert", "glossary.md")
+```
 
 ## 注意
-此 Skill 无脚本，不支持 get_skill_script 调用。
+- 本 Skill 无脚本，不支持 get_skill_script 调用
+- 按需加载所需资源文件，无需全部加载

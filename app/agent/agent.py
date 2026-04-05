@@ -11,7 +11,6 @@
   discover_skills()  → 扫描所有 Skill 目录（测试用）
   build_agent()      → 构建 Team（向后兼容别名）
   _build_model()     → 按 provider 构建模型
-  build_knowledge()  → 构建 LanceDB Knowledge
 """
 from __future__ import annotations
 
@@ -27,7 +26,6 @@ from app.config import LLMConfig, load_config
 from .team import (
     build_team,
     get_team,
-    build_knowledge,
     _build_model,
     ORCHESTRATOR_PROMPT,
 )

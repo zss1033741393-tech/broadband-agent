@@ -63,6 +63,22 @@ def infer_from_app_history(
     return up_profile
 
 
+def merge_intent_with_profile(
+    intent_goal: dict[str, Any],
+    profile: dict[str, Any],
+) -> dict[str, Any]:
+    """
+    将用户画像数据合并到意图目标中，补全缺失字段。
+    只填充 intent_goal 中为空的字段。
+    """
+    merged = dict(intent_goal)
+    profile_data = profile.get("user_profile", {})
+    for key, value in profile_data.items():
+        if not merged.get(key) and value:
+            merged[key] = value
+    return merged
+
+
 def check_missing_fields(profile: dict[str, Any]) -> list[str]:
     """检查画像中哪些关键字段仍然缺失"""
     user_profile = profile.get("user_profile", {})

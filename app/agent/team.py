@@ -1,22 +1,22 @@
 """OrchestratorTeam — 主控（Agno Team，TeamMode.coordinate）
 
 协调 4 个专家子 Agent 完成完整的宽带优化流程：
-  IntentAgent  → 目标解析 + 追问 + 用户画像
-  PlanAgent    → 五大方案生成
-  ConstraintAgent → 约束校验（可选）
-  ConfigAgent  → 配置转译
+  IntentAgent      → 目标解析 + 追问 + 用户画像
+  PlanAgent        → 五大方案生成
+  ConstraintAgent  → 约束校验（必须执行）
+  ConfigAgent      → 配置转译
+
+领域知识（domain_expert Skill）已下沉至各子 Agent，
+主控仅负责流程调度，不挂载 Knowledge RAG。
 """
 from __future__ import annotations
 
 import logging
-from pathlib import Path
 
 from agno.db.sqlite import SqliteDb
 from agno.guardrails import PromptInjectionGuardrail
-from agno.knowledge import Knowledge
 from agno.models.openai import OpenAIChat
 from agno.team import Team, TeamMode
-from agno.vectordb.lancedb import LanceDb
 
 from app.config import LLMConfig, load_config
 from app.outputs.sink import output_sink_hook
@@ -25,14 +25,13 @@ from .intent_agent import build_intent_agent
 from .plan_agent import build_plan_agent
 from .constraint_agent import build_constraint_agent
 from .config_agent import build_config_agent
-from .tools import SKILLS_DIR
 
 logger = logging.getLogger("agent.team")
 
 cfg = load_config()
 
 ORCHESTRATOR_PROMPT = """\
-你是家庭宽带体验感知优化主控。按如下流程将任务委托给专家子 Agent：
+你是家庭宽带 CEI 体验感知优化主控。按如下流程将任务委托给专家子 Agent：
 
 1. IntentAgent — 解析用户意图 + 补全画像
    若追问未完成 → 将追问话术原样转达用户，等待回复后继续
@@ -69,46 +68,10 @@ def _build_model(llm: LLMConfig, model_id: str | None = None):
     )
 
 
-def build_knowledge() -> Knowledge | None:
-    """构建 LanceDB Knowledge，灌入 domain_expert/references/ 中的文本类文档"""
-    try:
-        if cfg.llm.provider == "anthropic":
-            from agno.knowledge.embedder.fastembed import FastEmbedEmbedder
-            embedder = FastEmbedEmbedder()
-        else:
-            from agno.knowledge.embedder.openai_like import OpenAILikeEmbedder
-            embedder = OpenAILikeEmbedder(
-                id="text-embedding-3-small",
-                api_key=cfg.llm.api_key,
-                base_url=cfg.llm.base_url,
-            )
-        lancedb = LanceDb(
-            uri=cfg.storage.lancedb_uri,
-            table_name=cfg.storage.lancedb_table,
-            embedder=embedder,
-        )
-        knowledge = Knowledge(vector_db=lancedb)
-        domain_refs = SKILLS_DIR / "domain_expert" / "references"
-        if domain_refs.exists():
-            for md_path in sorted(domain_refs.glob("*.md")):
-                try:
-                    knowledge.insert(name=md_path.stem, path=str(md_path), skip_if_exists=True)
-                    logger.debug("领域知识已灌入: %s", md_path.name)
-                except Exception as exc:
-                    logger.warning("知识灌入失败 %s: %s", md_path.name, exc)
-        return knowledge
-    except Exception as exc:
-        logger.warning("Knowledge 初始化失败，跳过 RAG: %s", exc)
-        return None
-
-
 def build_team() -> Team:
     """构建并返回 OrchestratorTeam 实例"""
     agents_cfg = cfg.pipeline.agents
     debug_mode = cfg.pipeline.debug_mode
-
-    orchestrator_model = _build_model(cfg.llm)
-    knowledge = build_knowledge()
 
     intent_agent = build_intent_agent(
         model=_build_model(cfg.llm, agents_cfg.intent.model),
@@ -135,8 +98,7 @@ def build_team() -> Team:
         name="家宽CEI体验优化团队",
         members=[intent_agent, plan_agent, constraint_agent, config_agent],
         mode=TeamMode.coordinate,
-        model=orchestrator_model,
-        knowledge=knowledge,
+        model=_build_model(cfg.llm),
         instructions=ORCHESTRATOR_PROMPT,
         add_history_to_context=True,
         num_history_runs=cfg.pipeline.num_history_runs,

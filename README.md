@@ -31,7 +31,7 @@ OrchestratorTeam ─────────────────────
 | LLM 接入 | `OpenAIChat`（兼容 OpenAI API 格式，可对接内网模型） |
 | Skills | `LocalSkills` 按需加载，元工具原生执行脚本 |
 | 直接工具 | `check_constraints` / `translate_configs`（无 subprocess 开销） |
-| 领域知识 RAG | LanceDB 向量存储，`Knowledge.insert()` 幂等灌入 |
+| 领域知识 | `domain_expert` Skill（L3 资源文件），下沉至各子 Agent，按需 `get_skill_reference` 加载 |
 | 会话持久化 | `SqliteDb`（Team + AgentOS 双层） |
 | 安全护栏 | `PromptInjectionGuardrail` 输入校验 |
 | Web 服务 | `AgentOS(teams=[...])` 原生 trace + API |
@@ -65,7 +65,7 @@ broadband-agent/
 │   ├── plan_generator/       # 五大方案模板填充
 │   ├── constraint_checker/   # 约束校验（强制步骤）
 │   ├── config_translator/    # NL2JSON 配置转译
-│   └── domain_expert/        # 领域知识（Knowledge RAG）
+│   └── domain_expert/        # 领域知识库（CEI指标/设备能力/术语表，下沉至子Agent）
 ├── ui/
 │   └── chat_ui.py            # Gradio 调试界面（结构化活动日志）
 ├── data/                     # 运行时数据（.gitignore 排除）
@@ -218,7 +218,7 @@ skills/{skill_name}/
 | `plan_generator` | `generate.py` | 基于意图目标并行填充五大优化方案模板 |
 | `constraint_checker` | `validate.py` | 校验方案的性能约束、组网约束、策略冲突（**强制步骤**） |
 | `config_translator` | `translate.py` | 将语义方案转译为设备可下发的配置（NL2JSON） |
-| `domain_expert` | 无脚本 | 领域知识参考，已灌入 LanceDB，优先使用 Knowledge 检索 |
+| `domain_expert` | 无脚本 | 领域知识库（CEI指标/设备能力矩阵/术语表），通过 `get_skill_reference` 按需加载，已下沉至全部4个子Agent |
 
 ## 阶段产出物持久化
 

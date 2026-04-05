@@ -26,22 +26,6 @@ def validate_intent(intent_goal: dict[str, Any]) -> tuple[bool, list[str]]:
     return len(missing) == 0, missing
 
 
-def merge_with_profile(
-    intent_goal: dict[str, Any],
-    user_profile: dict[str, Any],
-) -> dict[str, Any]:
-    """
-    将用户画像数据合并到意图目标中，补全缺失字段。
-    只填充 intent_goal 中为空的字段。
-    """
-    merged = dict(intent_goal)
-    profile_data = user_profile.get("user_profile", {})
-    for key, value in profile_data.items():
-        if not merged.get(key) and value:
-            merged[key] = value
-    return merged
-
-
 def generate_followup_questions(missing_fields: list[str]) -> str:
     """根据缺失字段生成自然语言追问"""
     field_questions: dict[str, str] = {

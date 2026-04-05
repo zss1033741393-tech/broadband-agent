@@ -20,6 +20,7 @@ CONFIG_PROMPT = """\
 def build_config_agent(model, num_history_runs: int, debug_mode: bool) -> Agent:
     skills = Skills(loaders=[
         LocalSkills(path=str(SKILLS_DIR / "config_translator"), validate=False),
+        LocalSkills(path=str(SKILLS_DIR / "domain_expert"), validate=False),
     ])
     return Agent(
         name="ConfigAgent",

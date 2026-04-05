@@ -9,9 +9,9 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from skills.intent_parser.scripts.extract import (
     generate_followup_questions,
     load_intent_schema,
-    merge_with_profile,
     validate_intent,
 )
+from skills.user_profiler.scripts.query_profile import merge_intent_with_profile
 
 
 def test_load_intent_schema() -> None:
@@ -44,9 +44,9 @@ def test_generate_followup_questions() -> None:
     assert isinstance(questions, str)
 
 
-def test_merge_with_profile() -> None:
+def test_merge_intent_with_profile() -> None:
     intent = {"user_type": "", "scenario": "低延迟保障"}
     profile = {"user_profile": {"user_type": "游戏用户"}}
-    merged = merge_with_profile(intent, profile)
+    merged = merge_intent_with_profile(intent, profile)
     assert merged["user_type"] == "游戏用户"
     assert merged["scenario"] == "低延迟保障"  # 非空字段不被覆盖

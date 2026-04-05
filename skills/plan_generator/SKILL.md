@@ -1,32 +1,25 @@
 ---
 name: plan_generator
 description: >
-  基于意图目标填充五大方案 JSON 模板。读取 references/ 中的方案模板，
-  根据 filling_rules.md 决策哪些参数需要调整，执行填充。
-  当意图解析完成、需要生成具体方案时使用此 Skill。
-  五个模板可以并行填充（互不依赖）。
+  【Generator 模式】基于意图目标填充五大方案 JSON 模板。
+  触发条件：IntentGoal 已完整且画像补全后；或收到约束 suggestions 需重新生成方案。
+  输出五个可执行方案，供 constraint_checker 校验。
 ---
 
 # 方案模板填充
 
-## 何时使用
-- IntentGoal 已完整，需要生成具体方案
-- 用户修改了需求，需要重新调整方案参数
-- 约束校验失败后，需要根据失败原因调整参数
+## 执行步骤
 
-## 如何执行
-
-**第一步**：加载指令和规则
+**步骤 1**：加载参数决策规则（决定哪些参数需要调整）：
 
 ```
-get_skill_instructions("plan_generator")
 get_skill_reference("plan_generator", "filling_rules.md")
 ```
 
-**第二步**：获取意图产出文件路径，再执行方案填充脚本
+**步骤 2**：获取意图产出文件路径，执行方案填充：
 
 ```
-# 先获取上一阶段产出文件路径（避免内联完整 JSON 浪费 token）
+# 获取上一阶段产出路径（避免内联完整 JSON 浪费 token）
 get_pipeline_file("intent")   # → "outputs/<sid>/intent.json"
 
 get_skill_script(
@@ -37,7 +30,7 @@ get_skill_script(
 )
 ```
 
-**脚本输出格式（stdout JSON）**：
+**脚本输出**：
 
 ```json
 {
@@ -48,18 +41,19 @@ get_skill_script(
       "filled_data": { ... },
       "changes": ["cei_perception.warning_threshold.latency_ms: 100 → 50"],
       "status": "filled"
-    },
-    ...
-  ],
-  "rules": "..."
+    }
+  ]
 }
 ```
 
-- `plans` 包含 5 项，每项对应一个模板
-- `changes` 列出相对默认值的修改项
-- 向用户展示 changes 摘要后，继续执行约束校验
+- `plans` 包含 5 项，对应五大方案模板
+- `changes` 列出相对默认值的修改项，向用户展示摘要
 
 ## 规则
-- 不需要修改的参数保持模板默认值
+- 未被意图目标影响的参数保持模板默认值
 - 脚本内部并行处理 5 个模板（asyncio.gather）
-- 填充后必须立即进行约束校验（constraint_checker 是强制步骤）
+- 如收到约束 suggestions，按建议调整参数后重新生成，无需等待用户确认
+- 可参考 domain_expert 的 CEI 指标阈值（get_skill_reference("domain_expert", "cei_metrics.md")）辅助决策参数合理性
+
+## 后续建议
+填充完成后 → 立即调用 constraint_checker 校验（必须执行）

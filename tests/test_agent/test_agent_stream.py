@@ -114,8 +114,7 @@ class TestAgentInit:
     def test_build_agent_without_network(self) -> None:
         """build_agent（多 Agent 架构）不应发起网络请求，返回 Team 实例"""
         with patch("app.agent.team.Team") as MockTeam, \
-             patch("app.agent.team.OpenAIChat"), \
-             patch("app.agent.team.build_knowledge", return_value=None):
+             patch("app.agent.team.OpenAIChat"):
             MockTeam.return_value = MagicMock()
             from app.agent.agent import build_agent
             agent = build_agent()

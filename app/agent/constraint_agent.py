@@ -21,6 +21,7 @@ CONSTRAINT_PROMPT = """\
 def build_constraint_agent(model, num_history_runs: int, debug_mode: bool) -> Agent:
     skills = Skills(loaders=[
         LocalSkills(path=str(SKILLS_DIR / "constraint_checker"), validate=False),
+        LocalSkills(path=str(SKILLS_DIR / "domain_expert"), validate=False),
     ])
     return Agent(
         name="ConstraintAgent",

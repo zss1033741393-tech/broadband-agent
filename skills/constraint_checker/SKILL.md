@@ -1,18 +1,14 @@
 ---
 name: constraint_checker
 description: >
-  校验填充后的方案是否可执行。检查性能约束、组网方式约束、方案间策略冲突。
-  校验不通过时返回失败原因，供 Agent 决策是否回退调整方案。
-  当方案填充完成后使用此 Skill。这是强制步骤，不可跳过。
+  【Reviewer 模式】校验方案是否满足性能约束、组网约束和策略冲突规则。
+  触发条件：方案填充完成后（必须执行，不可跳过）；或方案调整后重新校验。
+  校验不通过时返回 suggestions 供 PlanAgent 修正。
 ---
 
 # 约束校验（强制步骤）
 
-## 何时使用
-- 方案填充完成后，验证可执行性（**必须执行**）
-- Agent 修正方案后，重新校验
-
-## 如何执行
+## 执行步骤
 
 **推荐方式（直接 Python 工具，无 subprocess 开销）**：
 
@@ -22,7 +18,7 @@ check_constraints(plans_file)
 # intent_goal 可省略，工具自动从 outputs/<sid>/intent.json 读取
 ```
 
-**备用方式（subprocess，独立 CLI 调试时使用）**：
+**备用方式（subprocess，CLI 调试时使用）**：
 
 ```
 get_skill_script(
@@ -34,8 +30,10 @@ get_skill_script(
 )
 ```
 
-> `validate.py` 内部自动加载 `performance_rules.json` 和 `conflict_matrix.json`，
-> **不需要**提前调用 `get_skill_reference` 读取这些文件。
+> `validate.py` 自动加载以下规则文件，无需提前读取：
+> - `references/performance_rules.json` — 采集间隔、CPU 负载约束
+> - `references/conflict_matrix.json` — 节能时段 vs 保障时段、WiFi 策略冲突
+> - `references/topology_rules.json` — 设备型号/纳管/版本组网约束
 
 **输出格式**：
 
@@ -51,11 +49,9 @@ get_skill_script(
 
 ## 处理规则
 - `passed=true` → 进入配置转译
-- conflicts 非空（severity=error）→ 根据 suggestions 自动调整方案，重新校验
-- warnings 非空（severity=warning）→ 向用户说明风险，等待确认
+- `conflicts` 非空（severity=error）→ 将 suggestions 返回给主控，由 PlanAgent 重新生成
+- `warnings` 非空（severity=warning）→ 告知用户风险，等待确认后继续
 - 连续 3 次失败 → 声明需人工介入
 
-## 校验类型
-- **性能约束**：采集间隔、CPU 负载（references/performance_rules.json）
-- **组网约束**：设备型号/纳管/版本（references/topology_rules.json）
-- **冲突检测**：节能时段 vs 保障时段、WiFi 策略冲突（references/conflict_matrix.json）
+## 后续建议
+校验通过后 → 调用 config_translator 生成设备配置
