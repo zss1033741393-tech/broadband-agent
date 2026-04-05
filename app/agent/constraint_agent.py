@@ -4,6 +4,7 @@ from __future__ import annotations
 from agno.agent import Agent
 from agno.skills import LocalSkills, Skills
 
+from app.outputs.sink import output_sink_hook
 from .tools import get_pipeline_file, check_constraints, SKILLS_DIR
 
 CONSTRAINT_PROMPT = """\
@@ -32,6 +33,7 @@ def build_constraint_agent(model, num_history_runs: int, debug_mode: bool) -> Ag
         instructions=CONSTRAINT_PROMPT,
         add_history_to_context=True,
         num_history_runs=num_history_runs,
+        tool_hooks=[output_sink_hook],
         markdown=True,
         debug_mode=debug_mode,
     )
