@@ -2,7 +2,7 @@
 
 策略：
   - mock OpenAIChat + Skills 避免网络请求
-  - 验证 discover_skills / build_knowledge / Agent 构建正确
+  - 验证 discover_skills / build_agent / Team 构建正确
   - 验证 Agno 原生 arun() 流式事件可正确迭代
 """
 from __future__ import annotations

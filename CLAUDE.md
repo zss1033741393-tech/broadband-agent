@@ -37,21 +37,13 @@ broadband-agent/
 │   ├── config.py             # YAML 加载
 │   ├── agent/
 │   │   └── agent.py          # Agent 定义（全部 Agno 能力集成）
-│   ├── models/               # Pydantic 结构化输出
-│   │   ├── intent.py         # IntentGoal
-│   │   ├── plan.py           # PlanResult
-│   │   ├── constraint.py     # ConstraintResult
-│   │   └── config.py         # ConfigOutput
-│   ├── guardrails.py         # 自定义输出护栏
-│   ├── db/
 │   └── logger/
-├── skills/                   # 自包含 Skills（自动扫描）
-│   ├── intent_parser/        # SKILL.md + scripts/
-│   ├── user_profiler/        # SKILL.md + scripts/ + references/
-│   ├── plan_generator/       # SKILL.md + scripts/ + references/(5模板)
-│   ├── constraint_checker/   # SKILL.md + scripts/ + references/(规则)
-│   ├── config_translator/    # SKILL.md + scripts/ + references/(schema)
-│   └── domain_expert/        # SKILL.md + references/(知识→灌入Knowledge)
+├── skills/                   # 自包含 Skills（自动扫描，ADK 设计范式）
+│   ├── intent_profiler/      # 【Inversion】意图解析 + 画像推断补全
+│   ├── plan_generator/       # 【Generator】五大方案模板填充
+│   ├── constraint_checker/   # 【Reviewer】约束校验（强制步骤）
+│   ├── config_translator/    # 【Pipeline】NL2JSON 配置转译
+│   └── domain_expert/        # 【Tool Wrapper】领域知识库（下沉至全部子Agent）
 ├── ui/chat_ui.py             # Gradio 调试界面
 ├── data/
 │   ├── agent.db              # SQLite
@@ -60,47 +52,32 @@ broadband-agent/
 └── tests/
 ```
 
-## Agent 核心代码
+## 架构核心代码
 
 ```python
-from agno.agent import Agent
+# app/agent/team.py — 多 Agent 架构入口
+from agno.team import Team, TeamMode
 from agno.models.openai import OpenAIChat
-from agno.skills import Skills, LocalSkills
-from agno.memory import Memory
-from agno.knowledge import Knowledge
-from agno.vectordb.lancedb import LanceDb
-from agno.storage.agent.sqlite import SqliteAgentStorage
 from agno.guardrails import PromptInjectionGuardrail
+from agno.db.sqlite import SqliteDb
 from agno.os import AgentOS
-from app.config import load_config
-from pathlib import Path
 
-cfg = load_config()  # 全部从 configs/*.yaml 加载，零硬编码
-
-def discover_skills(skills_dir: Path) -> Skills:
-    loaders = []
-    for child in sorted(skills_dir.iterdir()):
-        if child.is_dir() and (child / "SKILL.md").exists():
-            loaders.append(LocalSkills(str(child)))
-    return Skills(loaders=loaders)
-
-agent = Agent(
-    model=OpenAIChat(id=cfg.llm.model, api_key=cfg.llm.api_key, base_url=cfg.llm.base_url),
-    skills=discover_skills(Path(cfg.pipeline.skills_dir)),
-    knowledge=Knowledge(vector_db=LanceDb(table_name=cfg.storage.lancedb_table, uri=cfg.storage.lancedb_uri)),
-    instructions=SYSTEM_PROMPT,
-    memory=Memory(),
-    add_history_to_context=True,
-    num_history_runs=cfg.pipeline.num_history_runs,
-    # enable_memories=True,          # P1: 用户系统就绪后启用
-    storage=SqliteAgentStorage(table_name=cfg.storage.sqlite_table, db_file=cfg.storage.sqlite_db_path),
+# 4 个专家子 Agent，各自持有独立 Skills + domain_expert
+team = Team(
+    name="家宽CEI体验优化团队",
+    members=[intent_agent, plan_agent, constraint_agent, config_agent],
+    mode=TeamMode.coordinate,        # 主控协调模式
+    model=_build_model(cfg.llm),
+    share_member_interactions=True,
+    stream_member_events=True,
+    tool_hooks=[output_sink_hook],   # 产出物自动持久化
     pre_hooks=[PromptInjectionGuardrail()],
-    max_turns=cfg.pipeline.max_turns,
-    reasoning=cfg.pipeline.reasoning,
-    debug_mode=cfg.pipeline.debug_mode,
+    tool_call_limit=cfg.pipeline.max_turns,
+    db=SqliteDb(db_file=cfg.storage.sqlite_db_path),
 )
 
-agent_os = AgentOS(agents=[agent], tracing=True)
+# AgentOS 原生 API + trace
+agent_os = AgentOS(teams=[team], tracing=True)
 app = agent_os.get_app()
 ```
 
@@ -110,15 +87,15 @@ app = agent_os.get_app()
 2. **Agent 自主决策**：不编排 Pipeline，system prompt 只提供流程指导
 3. **Skill 自包含**：模板、脚本、参考资料都在 Skill 内部
 4. **Skill 与模型解耦**：模型在 Agent 级注册，SKILL.md 不声明模型
-5. **Structured Output**：Skill 输出用 Pydantic response_model 强制约束
-6. **Streaming**：run_stream() 流式输出，思考过程实时可见
-7. **Guardrails**：输入防注入 + 输出 schema 校验
-8. **Knowledge RAG**：领域知识灌入 LanceDB，语义检索替代文件读取
-9. **User Memory**：P1，用户系统就绪后启用 enable_memories
-10. **AgentOS**：替代手写 FastAPI/Tracer，原生 API + trace + Web UI
-11. **所有配置在 YAML**：configs/llm.yaml 含 api_key，没有 .env
-12. **阶段产出物持久化**：四个阶段产出（意图/画像/方案/配置）需写入 `outputs/` 供下游系统消费，见"架构演进计划"
-13. **Skills 与会话解耦**：脚本层不感知 session_id，产出物写入由 app 层负责（通过 AgentOS post-hook 或独立 OutputSink）
+5. **Streaming**：run_stream() 流式输出，思考过程实时可见
+6. **Guardrails**：PromptInjectionGuardrail 输入防注入
+7. **领域知识下沉**：domain_expert Skill 挂载至全部子 Agent，通过 get_skill_reference 按需加载（不走 RAG）
+8. **User Memory**：P1，用户系统就绪后启用 enable_memories
+9. **AgentOS**：替代手写 FastAPI/Tracer，原生 API + trace + Web UI
+10. **所有配置在 YAML**：configs/llm.yaml 含 api_key，没有 .env；子 Agent 模型/历史轮数独立可配
+11. **阶段产出物持久化**：四个阶段产出（意图+画像/方案/校验/配置）写入 `outputs/` 供下游消费
+12. **Skills 与会话解耦**：脚本层不感知 session_id，产出物写入由 app 层 OutputSink hook 负责
+13. **ADK Skills 范式**：5 个 Skill 按 Inversion/Generator/Reviewer/Pipeline/Tool Wrapper 模式设计，L1/L2/L3 渐进式披露
 
 ## 架构演进计划
 
@@ -198,8 +175,8 @@ ruff check --fix . && ruff format .
 - 详细设计见 design.md（**设计文档只在本地维护，禁止提交到 git**）
 - **禁止将 `design.md` 或任何设计/原型文档提交到版本库**，此类文档仅供本地参考
 - **零硬编码**：所有配置从 configs/*.yaml 读取，通过 `load_config()` 统一加载
-- **追问交互**：intent_parser 返回 needs_clarification=true 时 Agent 必须暂停追问用户，不猜测
-- **画像补全**：user_profiler 返回 has_complete_profile=false 时，能推断的补全、关键字段追问、非关键用默认值
+- **追问交互**：intent_profiler 返回 complete=false 时 Agent 必须暂停追问用户，不猜测
+- **画像补全**：intent_profiler 内部自动推断补全，关键字段缺失时追问，非关键用默认值
 - **memory 优先**：用户历史画像中已有的字段不追问，直接使用
 - **约束校验警告**：severity=warning 必须告知用户并等待确认
 - 不要建 app/tools/ 或顶层 templates/ 目录
