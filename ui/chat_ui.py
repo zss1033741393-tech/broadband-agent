@@ -3,9 +3,14 @@
 每轮对话以分区块的活动日志呈现：
   🤖 子Agent — 主控委托给某个子 Agent（IntentAgent / PlanAgent / ...）
   📋 协调    — 主控委托前的规划文本（run_intermediate_content）
-  💭 思考    — 模型 native thinking 实时流出
+  💭 思考    — 模型 thinking（native reasoning / qwen3 <think> / 子 Agent 中间推理）
   🔧 工具    — 每次工具调用：工具名 + 参数（调用中 / 返回内容 / 错误）
-  💬 回答    — 最终模型回复（run_content，所有工具调用完成后）
+  💬 回答    — 最终模型回复（TeamRunEvent.run_content）
+
+思考内容来源（三条路径）：
+  1. ReasoningContentDeltaEvent — deepseek-reasoner / o1 等原生推理模型
+  2. RunContentEvent.reasoning_content — 模型 API 返回的 reasoning_content 字段
+  3. RunContentEvent.content 中的 <think>...</think> — qwen3 native thinking
 
 多 Agent 事件来源：
   - RunEvent.*       — 子 Agent（IntentAgent 等）产生的事件
@@ -30,6 +35,73 @@ from app.logger.setup import setup_logging
 setup_logging()
 
 logger = logging.getLogger("chat_ui")
+
+
+# ─────────────────────────────────────────────────────────────
+# <think> 标签流式解析器（qwen3 native thinking）
+# ─────────────────────────────────────────────────────────────
+
+class _ThinkTagParser:
+    """从流式 content delta 中分离 <think>...</think> 块。
+
+    Agno 在流式模式下不提取 qwen3 的 <think> 标签（仅非流式路径提取），
+    因此需要在 UI 层手动解析。采用状态机 + 缓冲区处理跨 delta 的标签边界。
+    """
+
+    _OPEN = "<think>"
+    _CLOSE = "</think>"
+
+    def __init__(self) -> None:
+        self._in_think = False
+        self._buf = ""
+
+    def feed(self, delta: str) -> list[tuple[str, str]]:
+        """输入一个 content delta，返回 [(kind, text), ...].
+
+        kind 为 "think" 或 "content"。
+        """
+        self._buf += delta
+        chunks: list[tuple[str, str]] = []
+        while True:
+            if self._in_think:
+                idx = self._buf.find(self._CLOSE)
+                if idx >= 0:
+                    think_text = self._buf[:idx]
+                    self._buf = self._buf[idx + len(self._CLOSE):]
+                    self._in_think = False
+                    if think_text:
+                        chunks.append(("think", think_text))
+                else:
+                    # 未见 </think>，保留末尾可能的部分标签
+                    safe = len(self._buf) - len(self._CLOSE) + 1
+                    if safe > 0:
+                        chunks.append(("think", self._buf[:safe]))
+                        self._buf = self._buf[safe:]
+                    break
+            else:
+                idx = self._buf.find(self._OPEN)
+                if idx >= 0:
+                    before = self._buf[:idx]
+                    self._buf = self._buf[idx + len(self._OPEN):]
+                    self._in_think = True
+                    if before:
+                        chunks.append(("content", before))
+                else:
+                    safe = len(self._buf) - len(self._OPEN) + 1
+                    if safe > 0:
+                        chunks.append(("content", self._buf[:safe]))
+                        self._buf = self._buf[safe:]
+                    break
+        return chunks
+
+    def flush(self) -> list[tuple[str, str]]:
+        """流结束时清空缓冲区。"""
+        if self._buf:
+            kind = "think" if self._in_think else "content"
+            result = [(kind, self._buf)]
+            self._buf = ""
+            return result
+        return []
 
 
 # ─────────────────────────────────────────────────────────────
@@ -84,7 +156,7 @@ class _ActivityLog:
             self._sections.append(new_sec)
 
     def on_thinking_delta(self, delta: str) -> None:
-        """native thinking delta"""
+        """thinking delta（reasoning / <think> / intermediate）"""
         sec = self._last("thinking")
         if sec and not sec.closed:
             sec.extend_last(delta)
@@ -220,7 +292,7 @@ _TOOL_ERR    = {RunEvent.tool_call_error.value,      TeamRunEvent.tool_call_erro
 
 # 主控委托前的规划文本（与最终回答分开渲染）
 _CONTENT_PLAN  = {TeamRunEvent.run_intermediate_content.value}
-# 子 Agent 中间内容（工具调用之间的推理/分析文本）
+# 子 Agent 中间内容（仅 output_model 场景下才发出，一般不触发）
 _MEMBER_INTERMEDIATE = {RunEvent.run_intermediate_content.value}
 # 子 Agent 最终回复（专家 Agent 完成后的输出）
 _MEMBER_CONTENT = {RunEvent.run_content.value}
@@ -250,6 +322,47 @@ _KNOWN_SILENT = {
 
 
 # ─────────────────────────────────────────────────────────────
+# 内容事件通用处理 — 提取 reasoning_content + <think> 标签
+# ─────────────────────────────────────────────────────────────
+
+def _dispatch_content_event(
+    event: Any,
+    log: _ActivityLog,
+    parser: _ThinkTagParser,
+    content_handler,
+) -> bool:
+    """处理一个 content 事件，提取思考内容并分发。
+
+    思考内容来源（优先级）：
+      1. event.reasoning_content — 模型 API 原生 reasoning（deepseek-reasoner 等）
+      2. <think>...</think> in event.content — qwen3 native thinking
+      3. 剩余 content — 交给 content_handler
+
+    Returns: 是否有内容产生
+    """
+    has_content = False
+
+    # 路径 1：模型 API 级别的 reasoning_content（deepseek-reasoner / o1 等）
+    reasoning = getattr(event, "reasoning_content", None)
+    if reasoning:
+        log.on_thinking_delta(reasoning)
+        has_content = True
+
+    # 路径 2+3：解析 content 中的 <think> 标签（qwen3），剩余交给 content_handler
+    content = getattr(event, "content", None)
+    if content:
+        chunks = parser.feed(content)
+        for kind, text in chunks:
+            if kind == "think":
+                log.on_thinking_delta(text)
+            else:
+                content_handler(text)
+            has_content = True
+
+    return has_content
+
+
+# ─────────────────────────────────────────────────────────────
 # 流式对话核心 — 供 Gradio ChatInterface 调用
 # ─────────────────────────────────────────────────────────────
 
@@ -258,6 +371,9 @@ async def _stream_chat(message: str, history: list) -> AsyncIterator[str]:
     team = get_agent()
     log = _ActivityLog()
     has_yielded = False
+    # 每个 content 事件源需要独立的 <think> 解析器（状态隔离）
+    member_parser = _ThinkTagParser()
+    team_parser = _ThinkTagParser()
 
     try:
         async for event in team.arun(message, stream=True, stream_events=True):
@@ -294,7 +410,7 @@ async def _stream_chat(message: str, history: list) -> AsyncIterator[str]:
                     yield log.render()
 
             elif event_type in _MEMBER_INTERMEDIATE:
-                # 子 Agent 工具调用之间的推理/分析文本，显示为"💭 思考"
+                # 子 Agent 工具调用之间的推理/分析文本（仅 output_model 场景）
                 content = getattr(event, "content", None)
                 if content:
                     log.on_thinking_delta(content)
@@ -302,26 +418,25 @@ async def _stream_chat(message: str, history: list) -> AsyncIterator[str]:
                     yield log.render()
 
             elif event_type in _MEMBER_CONTENT:
-                # 子 Agent 最终回复（专家 Agent 的详细输出）
-                content = getattr(event, "content", None)
-                if content:
-                    log.on_member_content_delta(content)
+                # 子 Agent 回复：提取 reasoning_content + <think> 标签
+                if _dispatch_content_event(
+                    event, log, member_parser, log.on_member_content_delta
+                ):
                     has_yielded = True
                     yield log.render()
 
             elif event_type in _TEAM_CONTENT:
-                # 主控最终回答
-                content = getattr(event, "content", None)
-                if content:
-                    log.on_answer_delta(content)
+                # 主控回答：同样提取 reasoning_content + <think> 标签
+                if _dispatch_content_event(
+                    event, log, team_parser, log.on_answer_delta
+                ):
                     has_yielded = True
                     yield log.render()
 
             elif event_type in _REASONING:
-                # reasoning_content_delta：尝试多个属性名（Agno 版本差异）
+                # ReasoningContentDeltaEvent（独立推理事件，reasoning: true 场景）
                 delta = (
-                    getattr(event, "delta", None)
-                    or getattr(event, "reasoning_content", None)
+                    getattr(event, "reasoning_content", None)
                     or getattr(event, "content", None)
                 )
                 if delta:
@@ -336,7 +451,12 @@ async def _stream_chat(message: str, history: list) -> AsyncIterator[str]:
                     or getattr(event, "name", None)
                 )
                 if member_name:
-                    # 新子 Agent 开始时，关闭前一个子 Agent 的所有开放块
+                    # 新子 Agent 开始时，清空解析器 + 关闭前一个子 Agent 的所有开放块
+                    for chunk_kind, chunk_text in member_parser.flush():
+                        if chunk_kind == "think":
+                            log.on_thinking_delta(chunk_text)
+                        else:
+                            log.on_member_content_delta(chunk_text)
                     log._close_kind("thinking")
                     log._close_kind("member_answer")
                     log._close_kind("answer")
@@ -352,16 +472,34 @@ async def _stream_chat(message: str, history: list) -> AsyncIterator[str]:
                 return
 
             elif event_type not in _KNOWN_SILENT:
-                # 未知事件类型：记录 debug 日志帮助排查（如子 Agent 思考事件属性名）
+                # 未知事件类型：记录 debug 日志帮助排查
                 attrs = {k: v for k, v in vars(event).items()
                          if not k.startswith("_") and k != "event"}
                 logger.debug("未处理事件 type=%s attrs=%s", event_type, list(attrs.keys()))
+
+        # 流结束：清空所有 parser 缓冲区
+        for chunk_kind, chunk_text in member_parser.flush():
+            if chunk_kind == "think":
+                log.on_thinking_delta(chunk_text)
+            else:
+                log.on_member_content_delta(chunk_text)
+        for chunk_kind, chunk_text in team_parser.flush():
+            if chunk_kind == "think":
+                log.on_thinking_delta(chunk_text)
+            else:
+                log.on_answer_delta(chunk_text)
 
     except Exception as exc:
         logger.exception("_stream_chat error")
         log.on_error(str(exc))
         has_yielded = True
         yield log.render()
+
+    # 最终渲染（含 flush 的尾部内容）
+    final = log.render()
+    if final:
+        has_yielded = True
+        yield final
 
     if not has_yielded:
         yield (
