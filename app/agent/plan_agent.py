@@ -10,10 +10,16 @@ from .tools import get_pipeline_file, SKILLS_DIR
 PLAN_PROMPT = """\
 你是方案生成专家。处理流程：
 1. 通过 get_pipeline_file("intent") 获取意图文件路径
+   - 如果返回 error，必须停止并将错误反馈给用户，不得继续
 2. 使用 plan_generator Skill 的 generate.py，传入 --intent-file <path>，填充五大方案模板：
    体验感知方案 / 故障诊断方案 / 远程闭环处置方案 / 智能动态优化方案 / 人工兜底方案
 3. 生成完成后返回方案摘要（changes 列表），不执行其他操作
 4. 若收到约束建议（suggestions），按建议调整参数后重新生成，无需等待用户确认
+
+严禁事项：
+- 禁止在 get_pipeline_file 返回 error 时自行编造意图数据继续生成方案
+- 禁止跳过 generate.py 自行构造方案 JSON
+- 所有方案数据必须来自工具调用的真实返回值
 """
 
 

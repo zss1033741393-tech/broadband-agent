@@ -35,7 +35,7 @@ OrchestratorTeam ─────────────────────
 | 会话持久化 | `SqliteDb`（Team + AgentOS 双层） |
 | 安全护栏 | `PromptInjectionGuardrail` 输入校验 |
 | Web 服务 | `AgentOS(teams=[...])` 原生 trace + API |
-| 调试界面 | Gradio `ChatInterface`，结构化活动日志 |
+| 调试界面 | Gradio `ChatInterface`，Claude 风格折叠式消息（`ChatMessage` + `MetadataDict`） |
 | 配置 | 纯 YAML，`load_config()` 统一加载，零硬编码 |
 
 ## 项目结构
@@ -133,7 +133,7 @@ python ui/chat_ui.py
 ### 4. 运行测试
 
 ```bash
-pytest tests/ -v          # 47 个测试全部通过
+pytest tests/ -v          # 50 个测试全部通过
 ruff check --fix . && ruff format .
 ```
 
@@ -149,14 +149,22 @@ ruff check --fix . && ruff format .
 | `ConfigAgent` | config_translator + domain_expert | 转译 4 类设备配置 | 1 |
 | `OrchestratorTeam` | — | 路由委托、汇总结果、用户交互 | 4 |
 
-### 直接 Python 工具（无 subprocess 开销）
+### 直接 Python 工具（无 subprocess 开销 + 自动落盘）
 
-ConstraintAgent 和 ConfigAgent 注册了直接 Python 函数工具，绕过 subprocess 调用：
+ConstraintAgent 和 ConfigAgent 注册了直接 Python 函数工具，绕过 subprocess 调用，结果自动写入 `outputs/{session_id}/`：
 
-| 工具 | 替代 | 说明 |
-|------|------|------|
-| `check_constraints(plans_file)` | `validate.py` subprocess | 直接调用规则引擎，无进程开销 |
-| `translate_configs(plans_file)` | `translate.py` subprocess | 直接调用字段映射，无进程开销 |
+| 工具 | 替代 | 产出文件 | 说明 |
+|------|------|----------|------|
+| `check_constraints(plans_file)` | `validate.py` subprocess | `constraint.json` | 直接调用规则引擎 + 自动落盘 |
+| `translate_configs(plans_file)` | `translate.py` subprocess | `configs.json` | 直接调用字段映射 + 自动落盘 |
+
+### 防编造机制
+
+所有子 Agent 的 system prompt 包含严禁条款：
+- 工具返回 error 时必须停止流程并反馈用户，不得跳过
+- 禁止在输入文件缺失时自行编造数据继续执行
+- `get_pipeline_file` 返回明确的错误指引（包含停止指令）
+- 前序阶段产出缺失时禁止执行后续阶段
 
 ### 决策流程
 
@@ -233,8 +241,8 @@ outputs/{session_id}/{stage}.json
 |------|------|------|
 | `intent.json` | `analyze.py` | 结构化意图 + 用户画像（合并） |
 | `plans.json` | `generate.py` | 五大方案填充结果 |
-| `constraint.json` | `validate.py` | 约束校验结果（重试时覆盖） |
-| `configs.json` | `translate.py` | 设备下发配置（下游消费） |
+| `constraint.json` | `check_constraints()` 直接工具 / `validate.py` | 约束校验结果（重试时覆盖） |
+| `configs.json` | `translate_configs()` 直接工具 / `translate.py` | 设备下发配置（下游消费） |
 
 ## 配置参数
 
