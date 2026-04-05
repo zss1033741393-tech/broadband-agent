@@ -31,6 +31,16 @@ FIELD_MAPPINGS: dict[str, dict[str, str]] = {
         "dynamic_optimization.energy_saving.trigger_time": "opt_energy_save_start",
         "dynamic_optimization.energy_saving.resume_time": "opt_energy_save_end",
     },
+    "diagnosis": {
+        "fault_diagnosis.auto_diagnosis.enabled": "diag_auto_enable",
+        "fault_diagnosis.auto_diagnosis.trigger_on_alert": "diag_trigger_on_alert",
+        "fault_diagnosis.auto_diagnosis.diagnosis_timeout_sec": "diag_timeout_sec",
+        "fault_diagnosis.diagnosis_items": "diag_items",
+        "fault_diagnosis.root_cause_analysis.enabled": "diag_rca_enable",
+        "fault_diagnosis.root_cause_analysis.max_depth": "diag_rca_max_depth",
+        "fault_diagnosis.report.include_suggestion": "diag_report_suggestion",
+        "fault_diagnosis.report.format": "diag_report_format",
+    },
 }
 
 
@@ -110,20 +120,9 @@ def translate_all_plans(
     for plan_name, config_type in plan_to_config_type.items():
         plan = plans.get(plan_name, {})
         filled_data = plan.get("filled_data", {})
-
-        if config_type == "diagnosis":
-            # 诊断配置直接透传，格式已兼容设备
-            configs.append({
-                "config_type": "diagnosis",
-                "version": "1.0",
-                "device_id": device_id,
-                "config_data": filled_data.get("fault_diagnosis", {}),
-                "apply_time": "immediate",
-            })
-        else:
-            config, failed = translate_plan_to_config(filled_data, config_type, device_id)
-            configs.append(config)
-            all_failed.extend(failed)
+        config, failed = translate_plan_to_config(filled_data, config_type, device_id)
+        configs.append(config)
+        all_failed.extend(failed)
 
     return {
         "configs": configs,

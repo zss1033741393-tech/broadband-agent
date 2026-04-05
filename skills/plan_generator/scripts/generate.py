@@ -82,6 +82,13 @@ def fill_template(
     return filled, changes
 
 
+def _time_in_range(time_str: str, start: str, end: str) -> bool:
+    """判断 time_str 是否在 start-end 范围内（支持跨午夜）"""
+    if start <= end:
+        return start <= time_str <= end
+    return time_str >= start or time_str <= end
+
+
 def build_params_from_intent(
     intent_goal: dict[str, Any],
     template_name: str,
@@ -130,6 +137,19 @@ def build_params_from_intent(
             params["dynamic_optimization.realtime_optimization.congestion_control"] = True
         if "办公" in user_type:
             params["dynamic_optimization.habit_pre_optimization.enabled"] = True
+
+        # ── 节能时段避让保障时段（预防 CONF_001）──────────────
+        if not all_day and _time_in_range("02:00", start_time, end_time):
+            # 默认节能触发 02:00 落在保障时段内，需要移出
+            end_h = int(end_time.split(":")[0])
+            safe_trigger_h = (end_h + 1) % 24
+            # 只有落在合理夜间时段（22:00-07:00）才移动，否则禁用节能
+            if safe_trigger_h >= 22 or safe_trigger_h <= 5:
+                safe_resume_h = (safe_trigger_h + 4) % 24
+                params["dynamic_optimization.energy_saving.trigger_time"] = f"{safe_trigger_h:02d}:00"
+                params["dynamic_optimization.energy_saving.resume_time"] = f"{safe_resume_h:02d}:00"
+            else:
+                params["dynamic_optimization.energy_saving.enabled"] = False
 
     elif template_name == "manual_fallback.json":
         if priority == "high":
