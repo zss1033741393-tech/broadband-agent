@@ -3,7 +3,8 @@
 每轮对话以折叠式活动日志呈现（Gradio ChatMessage + MetadataDict）：
   🤖 子Agent — 可折叠块，活跃时旋转图标，完成后自动折叠
     💭 思考  — 嵌套在 Agent 块内，thinking 完成后折叠
-    🔧 工具  — 嵌套在 Agent 块内，每个工具独立折叠
+    🔧 工具  — 嵌套在 Agent 块内，每个工具独立折叠，含中文说明+耗时
+    子Agent回复 — 嵌套在 Agent 块内，不折叠（普通文本）
   💬 回答    — 最终回答，普通消息不折叠
 
 思考内容来源（三条路径）：
@@ -22,6 +23,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from typing import Any, AsyncIterator
 
 import gradio as gr
@@ -136,6 +138,46 @@ _TAG_PLAN = "_plan"
 _TAG_AGENT = "_agent"
 _TAG_ERROR = "_error"
 
+# ── 工具名称 → 中文显示标题 ─────────────────────────────────
+_TOOL_LABELS: dict[str, str] = {
+    "get_skill_instructions": "📖 读取技能指南",
+    "get_skill_script": "⚙️ 执行技能脚本",
+    "get_skill_reference": "📚 读取参考资料",
+    "get_pipeline_file": "📂 读取阶段产出",
+    "check_constraints": "✅ 约束校验",
+    "translate_configs": "🔄 配置转译",
+}
+
+
+def _tool_display_title(name: str, args: dict[str, Any]) -> str:
+    """根据工具名 + 参数生成可读的中文折叠标题。"""
+    label = _TOOL_LABELS.get(name)
+    if label is None:
+        return f"🔧 {name}"
+
+    # 从参数中提取关键信息作为补充说明
+    detail = ""
+    if name == "get_skill_instructions":
+        detail = args.get("skill_name", "")
+    elif name == "get_skill_script":
+        skill = args.get("skill_name", "")
+        script = args.get("script", "")
+        detail = f"{skill}/{script}" if skill and script else skill or script
+    elif name == "get_skill_reference":
+        skill = args.get("skill_name", "")
+        path = args.get("path", "")
+        detail = f"{skill}/{path}" if skill and path else skill or path
+    elif name == "get_pipeline_file":
+        detail = args.get("stage", "")
+    elif name in ("check_constraints", "translate_configs"):
+        plans = args.get("plans_file", "")
+        if plans:
+            detail = plans.rsplit("/", 1)[-1] if "/" in plans else plans
+
+    if detail:
+        return f"{label} — {detail}"
+    return label
+
 
 class _MessageBuilder:
     """维护本轮对话的 ChatMessage 列表，支持折叠式渲染。
@@ -148,12 +190,14 @@ class _MessageBuilder:
         self._agent_id_counter = 0
         self._tool_count = 0
         self._current_agent_id: str | None = None
+        self._tool_start_time: float | None = None
 
     # ── 事件处理 ──────────────────────────────────────────────
 
     def on_member_start(self, member_name: str) -> None:
         """主控委托给子 Agent"""
         self._close_current_agent()
+        self._close_tag(_TAG_PLAN)
         self._agent_id_counter += 1
         self._current_agent_id = f"agent_{self._agent_id_counter}"
         msg = ChatMessage(
@@ -200,13 +244,14 @@ class _MessageBuilder:
             self._messages.append(msg)
 
     def on_member_content_delta(self, delta: str) -> None:
-        """子 Agent 最终回复（RunEvent.run_content）"""
+        """子 Agent 回复 — 嵌套在 Agent 块内但不折叠（普通文本）"""
         self._close_tag(_TAG_THINKING)
         msg = self._find_active(_TAG_MEMBER_ANSWER)
         if msg:
             msg.content += delta
         else:
-            metadata: dict[str, Any] = {"title": "💬 子Agent回复", "status": "pending"}
+            # parent_id 但无 title → 嵌套在 Agent 块内，不折叠
+            metadata: dict[str, Any] = {}
             if self._current_agent_id:
                 metadata["parent_id"] = self._current_agent_id
             msg = ChatMessage(content=delta, metadata=metadata)
@@ -218,6 +263,7 @@ class _MessageBuilder:
         self._close_tag(_TAG_PLAN)
         self._close_tag(_TAG_THINKING)
         self._close_tag(_TAG_MEMBER_ANSWER)
+        self._tool_start_time = time.monotonic()
 
         self._tool_count += 1
         args_clean = {k: v for k, v in args.items() if k not in ("args", "kwargs")}
@@ -227,7 +273,8 @@ class _MessageBuilder:
         else:
             content = "*执行中...*"
 
-        metadata: dict[str, Any] = {"title": f"🔧 {name}", "status": "pending"}
+        title = _tool_display_title(name, args)
+        metadata: dict[str, Any] = {"title": title, "status": "pending"}
         if self._current_agent_id:
             metadata["parent_id"] = self._current_agent_id
 
@@ -244,6 +291,10 @@ class _MessageBuilder:
         result_str = _format_result(result)
         msg.content += f"\n\n✅ **返回**\n```\n{result_str}\n```"
         msg.metadata["status"] = "done"
+        if self._tool_start_time is not None:
+            duration = time.monotonic() - self._tool_start_time
+            msg.metadata["duration"] = round(duration, 1)
+            self._tool_start_time = None
         msg._closed = True  # type: ignore[attr-defined]
 
     def on_tool_error(self, name: str, error: str) -> None:
@@ -253,18 +304,25 @@ class _MessageBuilder:
         msg.content = msg.content.replace("\n\n*执行中...*", "").replace("*执行中...*", "")
         msg.content += f"\n\n❌ **错误** `{error}`"
         msg.metadata["status"] = "done"
+        if self._tool_start_time is not None:
+            duration = time.monotonic() - self._tool_start_time
+            msg.metadata["duration"] = round(duration, 1)
+            self._tool_start_time = None
         msg._closed = True  # type: ignore[attr-defined]
 
     def on_answer_delta(self, delta: str) -> None:
-        """主控最终回答（TeamRunEvent.run_content）— 不折叠"""
-        self._close_current_agent()
+        """主控最终回答（TeamRunEvent.run_content）— 不折叠
+
+        不在此处关闭 Agent 块，避免后续子 Agent 事件失去归属。
+        Agent 块由 on_member_start（下一个 Agent）或 finalize() 关闭。
+        """
         self._close_tag(_TAG_MEMBER_ANSWER)
         self._close_tag(_TAG_THINKING)
+        self._close_tag(_TAG_PLAN)
         msg = self._find_active(_TAG_ANSWER)
         if msg:
             msg.content += delta
         else:
-            # 最终回答：普通 ChatMessage，无 metadata.title → 不显示为折叠块
             msg = ChatMessage(content=delta)
             msg._tag = _TAG_ANSWER  # type: ignore[attr-defined]
             msg._closed = False  # type: ignore[attr-defined]
@@ -278,6 +336,12 @@ class _MessageBuilder:
         msg._tag = _TAG_ERROR  # type: ignore[attr-defined]
         msg._closed = True  # type: ignore[attr-defined]
         self._messages.append(msg)
+
+    def finalize(self) -> None:
+        """流结束后调用，关闭所有未完成的块"""
+        self._close_current_agent()
+        self._close_tag(_TAG_PLAN)
+        self._close_tag(_TAG_ANSWER)
 
     # ── 快照（供 yield） ─────────────────────────────────────
 
@@ -318,8 +382,7 @@ class _MessageBuilder:
             return
         self._close_tag(_TAG_THINKING)
         self._close_tag(_TAG_MEMBER_ANSWER)
-        self._close_tag(_TAG_PLAN)
-        # 关闭 Agent 块本身
+        # Plan 是顶级块，不归属于 Agent，在此不关闭
         for msg in reversed(self._messages):
             if getattr(msg, "_tag", None) == _TAG_AGENT and not getattr(msg, "_closed", True):
                 msg._closed = True  # type: ignore[attr-defined]
@@ -352,6 +415,9 @@ _REASONING = {
 }
 _MEMBER_START = {TeamRunEvent.task_iteration_started.value}
 
+# 需要立即 yield 的重要事件（状态转变型）
+_IMPORTANT_EVENTS = _TOOL_START | _TOOL_DONE | _TOOL_ERR | _MEMBER_START | _ERROR
+
 # 已知但不需渲染的事件（避免 debug 噪音）
 _KNOWN_SILENT = {
     RunEvent.run_started.value,
@@ -365,6 +431,9 @@ _KNOWN_SILENT = {
     RunEvent.memory_update_started.value,
     RunEvent.memory_update_completed.value,
 }
+
+# 流式 delta 事件的 yield 最小间隔（秒），避免过度刷新
+_YIELD_INTERVAL = 0.08
 
 
 # ─────────────────────────────────────────────────────────────
@@ -414,10 +483,15 @@ async def _stream_chat(
 
     每次 yield 一个 ChatMessage 列表，ChatInterface._stream_fn 会用它
     替换（非追加）当前助手响应。
+
+    节流策略：重要事件（工具开始/完成、Agent 开始、错误）立即 yield；
+    delta 类事件按 _YIELD_INTERVAL 间隔合并 yield，减少 SSE 开销。
     """
     team = get_agent()
     builder = _MessageBuilder()
     has_yielded = False
+    pending_yield = False
+    last_yield_time = 0.0
     member_parser = _ThinkTagParser()
     team_parser = _ThinkTagParser()
 
@@ -425,55 +499,47 @@ async def _stream_chat(
         async for event in team.arun(message, stream=True, stream_events=True):
             event_type = getattr(event, "event", None)
             tool = getattr(event, "tool", None)
+            content_changed = False
 
             if event_type in _TOOL_START:
                 name = getattr(tool, "tool_name", "?") if tool else "?"
                 args = getattr(tool, "tool_args", {}) or {}
                 builder.on_tool_start(name, args)
-                has_yielded = True
-                yield builder.snapshot()
+                content_changed = True
 
             elif event_type in _TOOL_DONE:
                 name = getattr(tool, "tool_name", "?") if tool else "?"
                 result = getattr(tool, "result", None)
                 builder.on_tool_complete(name, result)
-                has_yielded = True
-                yield builder.snapshot()
+                content_changed = True
 
             elif event_type in _TOOL_ERR:
                 name = getattr(tool, "tool_name", "?") if tool else "?"
                 error = getattr(tool, "tool_call_error", "未知错误") or "未知错误"
                 builder.on_tool_error(name, str(error))
-                has_yielded = True
-                yield builder.snapshot()
+                content_changed = True
 
             elif event_type in _CONTENT_PLAN:
                 content = getattr(event, "content", None)
                 if content:
                     builder.on_plan(content)
-                    has_yielded = True
-                    yield builder.snapshot()
+                    content_changed = True
 
             elif event_type in _MEMBER_INTERMEDIATE:
                 content = getattr(event, "content", None)
                 if content:
                     builder.on_thinking_delta(content)
-                    has_yielded = True
-                    yield builder.snapshot()
+                    content_changed = True
 
             elif event_type in _MEMBER_CONTENT:
-                if _dispatch_content_event(
+                content_changed = _dispatch_content_event(
                     event, builder, member_parser, builder.on_member_content_delta
-                ):
-                    has_yielded = True
-                    yield builder.snapshot()
+                )
 
             elif event_type in _TEAM_CONTENT:
-                if _dispatch_content_event(
+                content_changed = _dispatch_content_event(
                     event, builder, team_parser, builder.on_answer_delta
-                ):
-                    has_yielded = True
-                    yield builder.snapshot()
+                )
 
             elif event_type in _REASONING:
                 delta = (
@@ -482,8 +548,7 @@ async def _stream_chat(
                 )
                 if delta:
                     builder.on_thinking_delta(delta)
-                    has_yielded = True
-                    yield builder.snapshot()
+                    content_changed = True
 
             elif event_type in _MEMBER_START:
                 member_name = (
@@ -498,8 +563,7 @@ async def _stream_chat(
                         else:
                             builder.on_member_content_delta(chunk_text)
                     builder.on_member_start(member_name)
-                    has_yielded = True
-                    yield builder.snapshot()
+                    content_changed = True
 
             elif event_type in _ERROR:
                 error_msg = getattr(event, "error", "未知错误")
@@ -512,6 +576,16 @@ async def _stream_chat(
                 attrs = {k: v for k, v in vars(event).items()
                          if not k.startswith("_") and k != "event"}
                 logger.debug("未处理事件 type=%s attrs=%s", event_type, list(attrs.keys()))
+
+            # ── 节流 yield ────────────────────────────────────
+            if content_changed:
+                now = time.monotonic()
+                if event_type in _IMPORTANT_EVENTS or (now - last_yield_time) >= _YIELD_INTERVAL:
+                    has_yielded = True
+                    last_yield_time = now
+                    yield builder.snapshot()
+                else:
+                    pending_yield = True
 
         # 流结束：清空所有 parser 缓冲区
         for chunk_kind, chunk_text in member_parser.flush():
@@ -531,7 +605,8 @@ async def _stream_chat(
         has_yielded = True
         yield builder.snapshot()
 
-    # 最终快照（含 flush 的尾部内容）
+    # 关闭所有未完成块，yield 最终快照
+    builder.finalize()
     final = builder.snapshot()
     if final:
         has_yielded = True
