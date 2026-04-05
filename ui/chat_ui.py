@@ -41,7 +41,7 @@ class _Section:
     __slots__ = ("kind", "lines", "closed")
 
     def __init__(self, kind: str, initial: str = ""):
-        self.kind: str = kind        # "member"|"plan"|"thinking"|"tool"|"answer"|"error"
+        self.kind: str = kind        # "member"|"plan"|"thinking"|"tool"|"answer"|"member_answer"|"error"
         self.lines: list[str] = [initial] if initial else []
         self.closed: bool = False
 
@@ -91,11 +91,23 @@ class _ActivityLog:
         else:
             self._sections.append(_Section("thinking", delta))
 
+    def on_member_content_delta(self, delta: str) -> None:
+        """子 Agent 最终回复（RunEvent.run_content），与主控回答区分"""
+        # 关闭前面的 thinking 块（子 Agent 完成推理后输出最终内容）
+        self._close_kind("thinking")
+        sec = self._last("member_answer")
+        if sec and not sec.closed:
+            sec.extend_last(delta)
+        else:
+            new_sec = _Section("member_answer")
+            new_sec.append(delta)
+            self._sections.append(new_sec)
+
     def on_tool_start(self, name: str, args: dict[str, Any]) -> None:
-        # 关闭当前 plan 块，后续内容属于工具阶段
-        plan_sec = self._last("plan")
-        if plan_sec and not plan_sec.closed:
-            plan_sec.closed = True
+        # 关闭当前 plan / thinking / member_answer 块，后续内容属于工具阶段
+        self._close_kind("plan")
+        self._close_kind("thinking")
+        self._close_kind("member_answer")
 
         self._tool_count += 1
         header = f"**🔧 工具 #{self._tool_count}** `{name}`"
@@ -127,7 +139,10 @@ class _ActivityLog:
         sec.closed = True
 
     def on_answer_delta(self, delta: str) -> None:
-        """最终回答（run_content，所有工具调用完成后）"""
+        """主控最终回答（TeamRunEvent.run_content）"""
+        # 关闭子 Agent 回复块，主控回答是新的阶段
+        self._close_kind("member_answer")
+        self._close_kind("thinking")
         sec = self._last("answer")
         if sec and not sec.closed:
             sec.extend_last(delta)
@@ -144,18 +159,27 @@ class _ActivityLog:
     def render(self) -> str:
         parts: list[str] = []
         for sec in self._sections:
+            raw = sec.text()
+            if not raw.strip():
+                continue
             if sec.kind == "thinking":
-                raw = sec.text()
-                if raw.strip():
-                    quoted = "\n".join(f"> {line}" for line in raw.splitlines())
-                    parts.append(f"**💭 思考**\n\n{quoted}")
+                quoted = "\n".join(f"> {line}" for line in raw.splitlines())
+                parts.append(f"**💭 思考**\n\n{quoted}")
+            elif sec.kind == "member_answer":
+                # 子 Agent 回复不加标题前缀（内容本身已经有结构化格式）
+                # 与主控回答通过分隔线区分
+                parts.append(raw)
             else:
-                content = sec.text()
-                if content.strip():
-                    parts.append(content)
+                parts.append(raw)
         return self._SEP.join(parts) if parts else ""
 
     # ── 内部工具 ─────────────────────────────────────────────
+
+    def _close_kind(self, kind: str) -> None:
+        """关闭指定类型的最后一个未关闭 section"""
+        sec = self._last(kind)
+        if sec and not sec.closed:
+            sec.closed = True
 
     def _last(self, kind: str) -> "_Section | None":
         for sec in reversed(self._sections):
@@ -196,8 +220,12 @@ _TOOL_ERR    = {RunEvent.tool_call_error.value,      TeamRunEvent.tool_call_erro
 
 # 主控委托前的规划文本（与最终回答分开渲染）
 _CONTENT_PLAN  = {TeamRunEvent.run_intermediate_content.value}
-# 最终回答（子 Agent 或主控完成后的最终文本）
-_CONTENT_FINAL = {RunEvent.run_content.value, TeamRunEvent.run_content.value}
+# 子 Agent 中间内容（工具调用之间的推理/分析文本）
+_MEMBER_INTERMEDIATE = {RunEvent.run_intermediate_content.value}
+# 子 Agent 最终回复（专家 Agent 完成后的输出）
+_MEMBER_CONTENT = {RunEvent.run_content.value}
+# 主控最终回答（Orchestrator 完成后的最终文本）
+_TEAM_CONTENT   = {TeamRunEvent.run_content.value}
 
 _ERROR     = {RunEvent.run_error.value,              TeamRunEvent.run_error.value}
 _REASONING = {
@@ -211,7 +239,6 @@ _KNOWN_SILENT = {
     RunEvent.run_started.value,
     RunEvent.run_completed.value,
     RunEvent.run_content_completed.value,
-    RunEvent.run_intermediate_content.value,   # 子 Agent 层的，Team 层已在 _CONTENT_PLAN 处理
     RunEvent.reasoning_started.value,
     RunEvent.reasoning_completed.value,
     RunEvent.reasoning_step.value,
@@ -266,8 +293,24 @@ async def _stream_chat(message: str, history: list) -> AsyncIterator[str]:
                     has_yielded = True
                     yield log.render()
 
-            elif event_type in _CONTENT_FINAL:
-                # 最终回答
+            elif event_type in _MEMBER_INTERMEDIATE:
+                # 子 Agent 工具调用之间的推理/分析文本，显示为"💭 思考"
+                content = getattr(event, "content", None)
+                if content:
+                    log.on_thinking_delta(content)
+                    has_yielded = True
+                    yield log.render()
+
+            elif event_type in _MEMBER_CONTENT:
+                # 子 Agent 最终回复（专家 Agent 的详细输出）
+                content = getattr(event, "content", None)
+                if content:
+                    log.on_member_content_delta(content)
+                    has_yielded = True
+                    yield log.render()
+
+            elif event_type in _TEAM_CONTENT:
+                # 主控最终回答
                 content = getattr(event, "content", None)
                 if content:
                     log.on_answer_delta(content)
@@ -293,6 +336,10 @@ async def _stream_chat(message: str, history: list) -> AsyncIterator[str]:
                     or getattr(event, "name", None)
                 )
                 if member_name:
+                    # 新子 Agent 开始时，关闭前一个子 Agent 的所有开放块
+                    log._close_kind("thinking")
+                    log._close_kind("member_answer")
+                    log._close_kind("answer")
                     log.on_member_start(member_name)
                     has_yielded = True
                     yield log.render()
