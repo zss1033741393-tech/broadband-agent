@@ -209,10 +209,17 @@ if __name__ == "__main__":
 
     intent_goal_json = _read_arg("--intent-file", 0)
     try:
-        intent_goal = json.loads(intent_goal_json)
+        raw = json.loads(intent_goal_json)
     except json.JSONDecodeError:
         print(json.dumps({"error": "intent_goal_json 格式错误"}, ensure_ascii=False))
         sys.exit(1)
+
+    # intent.json 完整结构为 {"complete":..., "intent_goal":{...}, "profile":{...}}
+    # 兼容直接传入 intent_goal dict 的场景
+    if isinstance(raw, dict) and "intent_goal" in raw:
+        intent_goal = raw["intent_goal"]
+    else:
+        intent_goal = raw
 
     results = asyncio.run(fill_all_templates(intent_goal))
     rules = load_filling_rules()

@@ -168,9 +168,16 @@ if __name__ == "__main__":
         plans = raw_plans
 
     try:
-        intent_goal = json.loads(intent_goal_json)
+        raw_intent = json.loads(intent_goal_json)
     except json.JSONDecodeError:
-        intent_goal = {}
+        raw_intent = {}
+
+    # intent.json 完整结构为 {"complete":..., "intent_goal":{...}, "profile":{...}}
+    # 兼容直接传入 intent_goal dict 的场景
+    if isinstance(raw_intent, dict) and "intent_goal" in raw_intent:
+        intent_goal = raw_intent["intent_goal"]
+    else:
+        intent_goal = raw_intent
 
     result = run_all_checks(plans, intent_goal)
     print(json.dumps(result, ensure_ascii=False))

@@ -42,7 +42,8 @@ def _load_script_module(relative_path: str):
 def get_pipeline_file(stage: str) -> str:
     """获取本会话某阶段产出文件的路径。
 
-    stage 可选值：intent / profile / plans / constraint / configs
+    stage 可选值：intent / plans / constraint / configs
+    注意：profile 数据包含在 intent.json 的 "profile" 字段中，不是独立文件。
 
     在调用下一阶段脚本前，先调用此工具获取上一阶段产出路径，
     再以 --xxx-file <path> 参数传给脚本，脚本从磁盘读取，
@@ -91,7 +92,9 @@ def check_constraints(plans_file: str, intent_goal: dict[str, Any] | None = None
         if sid:
             intent_path = Path(f"outputs/{sid}/intent.json")
             if intent_path.exists():
-                intent_goal = json.loads(intent_path.read_text(encoding="utf-8"))
+                raw = json.loads(intent_path.read_text(encoding="utf-8"))
+                # intent.json 结构: {"complete":..., "intent_goal":{...}, "profile":{...}}
+                intent_goal = raw.get("intent_goal", raw) if isinstance(raw, dict) else raw
     if intent_goal is None:
         intent_goal = {}
 
