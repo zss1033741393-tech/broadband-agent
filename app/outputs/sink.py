@@ -18,6 +18,7 @@
 """
 from __future__ import annotations
 
+import inspect
 import json
 import logging
 from pathlib import Path
@@ -75,7 +76,7 @@ def _extract_stdout_json(result: Any) -> dict | None:
     return None
 
 
-def output_sink_hook(
+async def output_sink_hook(
     name: str,
     func: Callable,
     args: dict,
@@ -85,11 +86,14 @@ def output_sink_hook(
 
     Agno 按 hook 签名自动注入参数：
       name         — 工具函数名
-      func         — next_func（调用后继续执行链）
+      func         — next_func（调用后继续执行链，async 上下文中为协程函数）
       args         — 工具入参 dict
       run_context  — Agno RunContext，含 session_id / run_id
     """
     result = func(**args)
+    # Agno async 执行链中 next_func 返回 coroutine，必须 await
+    if inspect.isawaitable(result):
+        result = await result
 
     # 只处理 get_skill_script 且 execute=True 的调用
     if name != "get_skill_script" or not args.get("execute", False):

@@ -2,9 +2,10 @@
 
 每轮对话以分区块的活动日志呈现：
   🤖 子Agent — 主控委托给某个子 Agent（IntentAgent / PlanAgent / ...）
-  💭 思考  — 模型 native thinking 实时流出
-  🔧 工具  — 每次工具调用：工具名 + 参数（调用中 / 返回内容 / 错误）
-  💬 回答  — 最终模型回复
+  📋 协调    — 主控委托前的规划文本（run_intermediate_content）
+  💭 思考    — 模型 native thinking 实时流出
+  🔧 工具    — 每次工具调用：工具名 + 参数（调用中 / 返回内容 / 错误）
+  💬 回答    — 最终模型回复（run_content，所有工具调用完成后）
 
 多 Agent 事件来源：
   - RunEvent.*       — 子 Agent（IntentAgent 等）产生的事件
@@ -16,6 +17,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from typing import Any, AsyncIterator
 
 import gradio as gr
@@ -27,6 +29,8 @@ from app.logger.setup import setup_logging
 
 setup_logging()
 
+logger = logging.getLogger("chat_ui")
+
 
 # ─────────────────────────────────────────────────────────────
 # 活动日志数据结构
@@ -37,7 +41,7 @@ class _Section:
     __slots__ = ("kind", "lines", "closed")
 
     def __init__(self, kind: str, initial: str = ""):
-        self.kind: str = kind        # "member" | "thinking" | "tool" | "answer" | "error"
+        self.kind: str = kind        # "member"|"plan"|"thinking"|"tool"|"answer"|"error"
         self.lines: list[str] = [initial] if initial else []
         self.closed: bool = False
 
@@ -69,6 +73,16 @@ class _ActivityLog:
         """主控委托给子 Agent"""
         self._sections.append(_Section("member", f"**🤖 {member_name}**"))
 
+    def on_plan(self, delta: str) -> None:
+        """主控委托前的规划文本（run_intermediate_content），与最终回答区分"""
+        sec = self._last("plan")
+        if sec and not sec.closed:
+            sec.extend_last(delta)
+        else:
+            new_sec = _Section("plan")
+            new_sec.append(f"**📋 协调**\n\n{delta}")
+            self._sections.append(new_sec)
+
     def on_thinking_delta(self, delta: str) -> None:
         """native thinking delta"""
         sec = self._last("thinking")
@@ -78,6 +92,11 @@ class _ActivityLog:
             self._sections.append(_Section("thinking", delta))
 
     def on_tool_start(self, name: str, args: dict[str, Any]) -> None:
+        # 关闭当前 plan 块，后续内容属于工具阶段
+        plan_sec = self._last("plan")
+        if plan_sec and not plan_sec.closed:
+            plan_sec.closed = True
+
         self._tool_count += 1
         header = f"**🔧 工具 #{self._tool_count}** `{name}`"
         args_clean = {k: v for k, v in args.items() if k not in ("args", "kwargs")}
@@ -89,12 +108,10 @@ class _ActivityLog:
         self._sections.append(sec)
 
     def on_tool_complete(self, name: str, result: Any) -> None:
-        """找到最近一个未关闭的 tool section，替换"执行中"为返回内容"""
         sec = self._last_open_tool()
         if sec is None:
             return
-        lines = sec.text()
-        lines = lines.replace("\n\n*执行中…*", "")
+        lines = sec.text().replace("\n\n*执行中…*", "")
         result_str = _format_result(result)
         lines += f"\n\n✅ **返回**\n\n```\n{result_str}\n```"
         sec.lines = [lines]
@@ -110,6 +127,7 @@ class _ActivityLog:
         sec.closed = True
 
     def on_answer_delta(self, delta: str) -> None:
+        """最终回答（run_content，所有工具调用完成后）"""
         sec = self._last("answer")
         if sec and not sec.closed:
             sec.extend_last(delta)
@@ -161,25 +179,46 @@ def _format_result(result: Any) -> str:
             return json.dumps(result, ensure_ascii=False, indent=2)
         except Exception:
             return str(result)
-    return str(result)
+    s = str(result)
+    # 截断过长内容（避免把整个 JSON 文件内容塞进调试窗）
+    if len(s) > 1000:
+        s = s[:1000] + f"\n…（已截断，共 {len(s)} 字符）"
+    return s
 
 
 # ─────────────────────────────────────────────────────────────
 # 事件类型常量集合（统一处理 RunEvent + TeamRunEvent）
 # ─────────────────────────────────────────────────────────────
 
-_TOOL_START = {RunEvent.tool_call_started.value, TeamRunEvent.tool_call_started.value}
-_TOOL_DONE = {RunEvent.tool_call_completed.value, TeamRunEvent.tool_call_completed.value}
-_TOOL_ERR = {RunEvent.tool_call_error.value, TeamRunEvent.tool_call_error.value}
-_CONTENT = {
-    RunEvent.run_content.value,
-    TeamRunEvent.run_content.value,
-    TeamRunEvent.run_intermediate_content.value,
+_TOOL_START  = {RunEvent.tool_call_started.value,   TeamRunEvent.tool_call_started.value}
+_TOOL_DONE   = {RunEvent.tool_call_completed.value,  TeamRunEvent.tool_call_completed.value}
+_TOOL_ERR    = {RunEvent.tool_call_error.value,      TeamRunEvent.tool_call_error.value}
+
+# 主控委托前的规划文本（与最终回答分开渲染）
+_CONTENT_PLAN  = {TeamRunEvent.run_intermediate_content.value}
+# 最终回答（子 Agent 或主控完成后的最终文本）
+_CONTENT_FINAL = {RunEvent.run_content.value, TeamRunEvent.run_content.value}
+
+_ERROR     = {RunEvent.run_error.value,              TeamRunEvent.run_error.value}
+_REASONING = {
+    RunEvent.reasoning_content_delta.value,
+    TeamRunEvent.reasoning_content_delta.value,
 }
-_ERROR = {RunEvent.run_error.value, TeamRunEvent.run_error.value}
-_REASONING = {RunEvent.reasoning_content_delta.value, TeamRunEvent.reasoning_content_delta.value}
-_MEMBER_START = {
-    TeamRunEvent.task_iteration_started.value,
+_MEMBER_START = {TeamRunEvent.task_iteration_started.value}
+
+# 已知但不需渲染的事件（避免 debug 噪音）
+_KNOWN_SILENT = {
+    RunEvent.run_started.value,
+    RunEvent.run_completed.value,
+    RunEvent.run_content_completed.value,
+    RunEvent.run_intermediate_content.value,   # 子 Agent 层的，Team 层已在 _CONTENT_PLAN 处理
+    RunEvent.reasoning_started.value,
+    RunEvent.reasoning_completed.value,
+    RunEvent.reasoning_step.value,
+    RunEvent.model_request_started.value,
+    RunEvent.model_request_completed.value,
+    RunEvent.memory_update_started.value,
+    RunEvent.memory_update_completed.value,
 }
 
 
@@ -188,12 +227,7 @@ _MEMBER_START = {
 # ─────────────────────────────────────────────────────────────
 
 async def _stream_chat(message: str, history: list) -> AsyncIterator[str]:
-    """结构化活动日志异步生成器
-
-    处理来自 OrchestratorTeam 的两类事件：
-    - RunEvent.*       — 子 Agent（IntentAgent 等）的工具调用 / 内容
-    - TeamRunEvent.*   — 主控的工具调用 / 内容 / 子 Agent 委托
-    """
+    """结构化活动日志异步生成器"""
     team = get_agent()
     log = _ActivityLog()
     has_yielded = False
@@ -224,29 +258,40 @@ async def _stream_chat(message: str, history: list) -> AsyncIterator[str]:
                 has_yielded = True
                 yield log.render()
 
-            elif event_type in _CONTENT:
-                reasoning = getattr(event, "reasoning_content", None)
-                if reasoning:
-                    log.on_thinking_delta(reasoning)
+            elif event_type in _CONTENT_PLAN:
+                # 主控委托前的规划文本，显示为"📋 协调"块
+                content = getattr(event, "content", None)
+                if content:
+                    log.on_plan(content)
+                    has_yielded = True
+                    yield log.render()
 
+            elif event_type in _CONTENT_FINAL:
+                # 最终回答
                 content = getattr(event, "content", None)
                 if content:
                     log.on_answer_delta(content)
-
-                if reasoning or content:
                     has_yielded = True
                     yield log.render()
 
             elif event_type in _REASONING:
-                delta = getattr(event, "reasoning_content", None) or getattr(event, "delta", None)
+                # reasoning_content_delta：尝试多个属性名（Agno 版本差异）
+                delta = (
+                    getattr(event, "delta", None)
+                    or getattr(event, "reasoning_content", None)
+                    or getattr(event, "content", None)
+                )
                 if delta:
                     log.on_thinking_delta(delta)
                     has_yielded = True
                     yield log.render()
 
             elif event_type in _MEMBER_START:
-                # 主控委托给子 Agent，显示切换标记
-                member_name = getattr(event, "member_name", None) or getattr(event, "agent_name", None)
+                member_name = (
+                    getattr(event, "member_name", None)
+                    or getattr(event, "agent_name", None)
+                    or getattr(event, "name", None)
+                )
                 if member_name:
                     log.on_member_start(member_name)
                     has_yielded = True
@@ -259,7 +304,14 @@ async def _stream_chat(message: str, history: list) -> AsyncIterator[str]:
                 yield log.render()
                 return
 
+            elif event_type not in _KNOWN_SILENT:
+                # 未知事件类型：记录 debug 日志帮助排查（如子 Agent 思考事件属性名）
+                attrs = {k: v for k, v in vars(event).items()
+                         if not k.startswith("_") and k != "event"}
+                logger.debug("未处理事件 type=%s attrs=%s", event_type, list(attrs.keys()))
+
     except Exception as exc:
+        logger.exception("_stream_chat error")
         log.on_error(str(exc))
         has_yielded = True
         yield log.render()
@@ -279,9 +331,9 @@ async def _stream_chat(message: str, history: list) -> AsyncIterator[str]:
 def create_ui() -> gr.ChatInterface:
     return gr.ChatInterface(
         fn=_stream_chat,
-        title="家宽体验感知优化 Agent — 调试界面",
+        title="家宽 CEI 体验优化 Agent — 调试界面",
         description=(
-            "结构化活动日志：🤖 子Agent委托 → 💭 思考 → 🔧 工具调用（参数+返回）→ 💬 最终回答\n"
+            "结构化活动日志：🤖 子Agent委托 → 📋 协调规划 → 💭 思考 → 🔧 工具调用 → 💬 最终回答\n"
             "可清晰看到主控把任务委托给哪个专家、走了哪个流程、调了哪些 Skill、每步返回了什么。"
         ),
         examples=[
