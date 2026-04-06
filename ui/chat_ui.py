@@ -325,7 +325,7 @@ class _MessageBuilder:
     def on_answer_delta(self, delta: str) -> None:
         """主控最终回答（TeamRunEvent.run_content）— 不折叠
 
-        关闭当前 Agent 块，在最终回答前形成明确的视觉分割点。
+        关闭当前 Agent 块 + 插入分隔线，在最终回答前形成明确的视觉分割点。
         """
         self._close_tag(_TAG_MEMBER_ANSWER)
         self._close_tag(_TAG_THINKING)
@@ -335,6 +335,12 @@ class _MessageBuilder:
         if msg:
             msg.content += delta
         else:
+            # 分隔线：在最终回答前插入 <hr>，拉开与折叠块的视觉距离
+            if self._messages:
+                sep = ChatMessage(content="\n---\n")
+                sep._tag = "_sep"  # type: ignore[attr-defined]
+                sep._closed = True  # type: ignore[attr-defined]
+                self._messages.append(sep)
             msg = ChatMessage(content=delta)
             msg._tag = _TAG_ANSWER  # type: ignore[attr-defined]
             msg._closed = False  # type: ignore[attr-defined]
@@ -650,11 +656,46 @@ async def _stream_chat(
 # Gradio UI 构建
 # ─────────────────────────────────────────────────────────────
 
+# Claude 风格视觉层级 CSS —— 折叠块（思考/工具/推理）与正式回答之间拉开区分度
+_CUSTOM_CSS = """\
+/* ── 折叠块：左侧色条 + 底色，形成"活动日志"视觉层级 ── */
+#chatbot details {
+    border-left: 3px solid #6366f1;
+    background: #f7f7fb;
+    border-radius: 8px;
+    padding: 4px 12px;
+    margin: 8px 0;
+}
+#chatbot details[open] {
+    padding-bottom: 8px;
+}
+#chatbot details summary {
+    padding: 4px 0;
+    opacity: 0.85;
+}
+/* ── 分隔线样式（回答前的 ─── 横线） ── */
+#chatbot hr {
+    border: none;
+    border-top: 1.5px solid #d4d4d8;
+    margin: 16px 0 8px;
+}
+/* ── 暗色模式适配 ── */
+.dark #chatbot details {
+    border-left-color: #818cf8;
+    background: rgba(99, 102, 241, 0.06);
+}
+.dark #chatbot hr {
+    border-top-color: #3f3f46;
+}
+"""
+
+
 def create_ui() -> gr.ChatInterface:
     chatbot = gr.Chatbot(
         height=700,
+        elem_id="chatbot",
     )
-    return gr.ChatInterface(
+    ci = gr.ChatInterface(
         fn=_stream_chat,
         chatbot=chatbot,
         title="家宽 CEI 体验优化 Agent — 调试界面",
@@ -668,6 +709,9 @@ def create_ui() -> gr.ChatInterface:
             "视频会议老是卡，主要用腾讯会议，工作时间 9-18 点",
         ],
     )
+    ci.css = _CUSTOM_CSS
+    ci._deprecated_css = _CUSTOM_CSS
+    return ci
 
 
 if __name__ == "__main__":
