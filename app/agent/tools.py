@@ -11,13 +11,17 @@
   check_constraints  — 规则引擎约束校验   → constraint.json
   translate_configs  — 字段映射配置转译   → configs.json
 
+容错：每个工具通过 _guarded() 包装，单个工具超时/崩溃返回 error dict，
+不阻塞其他工具和整个 agent 流程。超时秒数由 pipeline.tool_timeout_sec 控制。
 落盘：每个工具调用后自动写入 outputs/{session_id}/{stage}.json。
 """
 from __future__ import annotations
 
+import functools
 import importlib.util
 import json
 import logging
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
 from pathlib import Path
 from typing import Any
 
@@ -29,11 +33,39 @@ logger = logging.getLogger("agent.tools")
 cfg = load_config()
 SKILLS_DIR = Path(cfg.pipeline.skills_dir).resolve()
 _OUTPUTS_ROOT = Path("outputs")
+_TOOL_TIMEOUT = cfg.pipeline.tool_timeout_sec
 
 
 # ─────────────────────────────────────────────────────────────
 # 内部工具
 # ─────────────────────────────────────────────────────────────
+
+def _guarded(fn):
+    """超时 + 异常保护装饰器。
+
+    在独立线程中执行工具函数，超时或异常时返回 {error: ...}，
+    不会阻塞 Agno agent 循环或影响其他工具调用。
+    """
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            future = pool.submit(fn, *args, **kwargs)
+            try:
+                return future.result(timeout=_TOOL_TIMEOUT)
+            except FuturesTimeout:
+                logger.error("工具 %s 执行超时 (>%ds)", fn.__name__, _TOOL_TIMEOUT)
+                return {
+                    "error": f"工具 {fn.__name__} 执行超时（>{_TOOL_TIMEOUT}s）。"
+                             "请将此错误反馈给用户，不要自行重试。"
+                }
+            except Exception as exc:
+                logger.exception("工具 %s 执行异常", fn.__name__)
+                return {
+                    "error": f"工具 {fn.__name__} 执行失败: {exc}。"
+                             "请将此错误反馈给用户，不要自行重试。"
+                }
+    return wrapper
+
 
 def _load_script_module(relative_path: str):
     """通过 importlib 按路径加载 skills/ 下的脚本模块"""
@@ -128,6 +160,7 @@ def get_pipeline_file(stage: str) -> str:
     return str(path)
 
 
+@_guarded
 def analyze_intent(
     intent_goal: dict[str, Any],
 ) -> dict[str, Any]:
@@ -178,6 +211,7 @@ def analyze_intent(
     return result
 
 
+@_guarded
 def generate_plans(
     intent_file: str = "",
 ) -> dict[str, Any]:
@@ -241,6 +275,7 @@ def generate_plans(
     return result
 
 
+@_guarded
 def check_constraints(
     plans_file: str, intent_goal: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
@@ -276,6 +311,7 @@ def check_constraints(
     return result
 
 
+@_guarded
 def translate_configs(
     plans_file: str, device_id: str = "",
 ) -> dict[str, Any]:

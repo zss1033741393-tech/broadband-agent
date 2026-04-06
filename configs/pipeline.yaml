@@ -6,6 +6,7 @@ pipeline:
   debug_mode: true
   clarification_max_rounds: 3
   clarification_max_fields_per_round: 3
+  tool_timeout_sec: 30             # 单个工具超时（秒），超时返回 error 不阻塞
   agents:
     intent:
       num_history_runs: 4

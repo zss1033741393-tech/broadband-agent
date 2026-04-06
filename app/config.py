@@ -55,6 +55,7 @@ class PipelineConfig(BaseModel):
     # 预留扩展开关：True 时切换为 LLM 实现，False 时使用规则引擎（当前原型）
     use_llm_constraint: bool = False
     use_llm_translation: bool = False
+    tool_timeout_sec: int = 30  # 单个工具执行超时（秒），超时返回 error 不阻塞流程
     agents: AgentsConfig = AgentsConfig()
 
 
