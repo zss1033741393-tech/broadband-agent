@@ -254,11 +254,15 @@ class _MessageBuilder:
         """主控委托前的规划文本"""
         self._plan += delta
 
+    def _ensure_agent(self) -> dict[str, Any]:
+        """确保存在活跃 Agent，没有则自动创建。防御性兜底。"""
+        if self._current is None:
+            self.on_member_start("Agent")
+        return self._current  # type: ignore[return-value]
+
     def on_thinking_delta(self, delta: str) -> None:
         """思考内容（reasoning / <think> / intermediate）"""
-        agent = self._current
-        if not agent:
-            return
+        agent = self._ensure_agent()
         t = self._current_thinking(agent)
         if t:
             t["text"] += delta
@@ -269,17 +273,14 @@ class _MessageBuilder:
 
     def on_member_content_delta(self, delta: str) -> None:
         """子 Agent 正文 — 累积到 content 字段，snapshot 时始终渲染在工具之后"""
-        agent = self._current
-        if not agent:
-            return
+        agent = self._ensure_agent()
         self._close_thinking(agent)
         agent["content"] += delta
 
     def on_tool_start(self, name: str, args: dict[str, Any]) -> None:
         """工具调用开始"""
-        agent = self._current
-        if agent:
-            self._close_thinking(agent)
+        agent = self._ensure_agent()
+        self._close_thinking(agent)
         self._tool_start_time = time.monotonic()
 
         args_clean = {k: v for k, v in args.items() if k not in ("args", "kwargs")}
@@ -294,12 +295,11 @@ class _MessageBuilder:
             "status": "pending",
             "duration": None,
         }
-        if agent:
-            agent["items"].append(item)
+        agent["items"].append(item)
 
     def on_tool_complete(self, name: str, result: Any) -> None:
         """工具调用完成"""
-        agent = self._current
+        agent = self._current or (self._agents[-1] if self._agents else None)
         if not agent:
             return
         tool = self._find_pending_tool(agent)
@@ -315,7 +315,7 @@ class _MessageBuilder:
 
     def on_tool_error(self, name: str, error: str) -> None:
         """工具调用出错"""
-        agent = self._current
+        agent = self._current or (self._agents[-1] if self._agents else None)
         if not agent:
             return
         tool = self._find_pending_tool(agent)
@@ -447,14 +447,13 @@ _REASONING = {
     RunEvent.reasoning_content_delta.value,
     TeamRunEvent.reasoning_content_delta.value,
 }
-_MEMBER_START = {TeamRunEvent.task_iteration_started.value}
+_MEMBER_START = {RunEvent.run_started.value, TeamRunEvent.task_iteration_started.value}
 
 # 需要立即 yield 的重要事件（状态转变型）
 _IMPORTANT_EVENTS = _TOOL_START | _TOOL_DONE | _TOOL_ERR | _MEMBER_START | _ERROR
 
 # 已知但不需渲染的事件（避免 debug 噪音）
 _KNOWN_SILENT = {
-    RunEvent.run_started.value,
     RunEvent.run_completed.value,
     RunEvent.run_content_completed.value,
     RunEvent.reasoning_started.value,
