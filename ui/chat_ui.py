@@ -24,6 +24,7 @@ from __future__ import annotations
 import json
 import logging
 import time
+import uuid
 from typing import Any, AsyncIterator
 
 import gradio as gr
@@ -33,6 +34,7 @@ from agno.run.agent import RunEvent
 from agno.run.team import TeamRunEvent
 from app.agent.agent import get_agent
 from app.logger.setup import setup_logging
+from app.outputs.sink import set_current_session_id
 
 setup_logging()
 
@@ -144,6 +146,7 @@ _TOOL_LABELS: dict[str, str] = {
     "get_skill_script": "⚙️ 执行技能脚本",
     "get_skill_reference": "📚 读取参考资料",
     "get_pipeline_file": "📂 读取阶段产出",
+    "generate_plans": "📝 生成优化方案",
     "check_constraints": "✅ 约束校验",
     "translate_configs": "🔄 配置转译",
 }
@@ -169,6 +172,9 @@ def _tool_display_title(name: str, args: dict[str, Any]) -> str:
         detail = f"{skill}/{path}" if skill and path else skill or path
     elif name == "get_pipeline_file":
         detail = args.get("stage", "")
+    elif name == "generate_plans":
+        f = args.get("intent_file", "")
+        detail = f.rsplit("/", 1)[-1] if "/" in f else (f.rsplit("\\", 1)[-1] if "\\" in f else f)
     elif name in ("check_constraints", "translate_configs"):
         plans = args.get("plans_file", "")
         if plans:
@@ -313,12 +319,12 @@ class _MessageBuilder:
     def on_answer_delta(self, delta: str) -> None:
         """主控最终回答（TeamRunEvent.run_content）— 不折叠
 
-        不在此处关闭 Agent 块，避免后续子 Agent 事件失去归属。
-        Agent 块由 on_member_start（下一个 Agent）或 finalize() 关闭。
+        关闭当前 Agent 块，在最终回答前形成明确的视觉分割点。
         """
         self._close_tag(_TAG_MEMBER_ANSWER)
         self._close_tag(_TAG_THINKING)
         self._close_tag(_TAG_PLAN)
+        self._close_current_agent()
         msg = self._find_active(_TAG_ANSWER)
         if msg:
             msg.content += delta
@@ -476,6 +482,10 @@ def _dispatch_content_event(
 # 流式对话核心 — 供 Gradio ChatInterface 调用
 # ─────────────────────────────────────────────────────────────
 
+# 当前活跃会话 ID（调试 UI 单用户场景，模块级变量即可）
+_active_session_id: str | None = None
+
+
 async def _stream_chat(
     message: str, history: list,
 ) -> AsyncIterator[list[ChatMessage]]:
@@ -487,6 +497,14 @@ async def _stream_chat(
     节流策略：重要事件（工具开始/完成、Agent 开始、错误）立即 yield；
     delta 类事件按 _YIELD_INTERVAL 间隔合并 yield，减少 SSE 开销。
     """
+    global _active_session_id
+    # 新对话（history 为空）→ 生成新 session_id，避免历史污染
+    if not history:
+        _active_session_id = str(uuid.uuid4())
+    session_id = _active_session_id
+    # 提前设置 session_id，确保 get_pipeline_file 等工具可用
+    set_current_session_id(session_id)
+
     team = get_agent()
     builder = _MessageBuilder()
     has_yielded = False
@@ -496,7 +514,7 @@ async def _stream_chat(
     team_parser = _ThinkTagParser()
 
     try:
-        async for event in team.arun(message, stream=True, stream_events=True):
+        async for event in team.arun(message, stream=True, stream_events=True, session_id=session_id):
             event_type = getattr(event, "event", None)
             tool = getattr(event, "tool", None)
             content_changed = False

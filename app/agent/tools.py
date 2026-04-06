@@ -2,11 +2,13 @@
 
 包含：
   get_pipeline_file  — 获取上一阶段产出文件路径（缺失时报错，禁止编造）
+  generate_plans     — 直接 Python 方案生成 + 自动落盘 plans.json
   check_constraints  — 直接 Python 约束校验 + 自动落盘 constraint.json
   translate_configs  — 直接 Python 配置转译 + 自动落盘 configs.json
 """
 from __future__ import annotations
 
+import asyncio
 import importlib.util
 import json
 import logging
@@ -118,6 +120,53 @@ def get_pipeline_file(stage: str) -> str:
                      "请停止当前操作并告知用户：上一阶段可能执行失败，需要检查。"
         }, ensure_ascii=False)
     return str(path)
+
+
+def generate_plans(
+    intent_file: str = "",
+) -> dict[str, Any]:
+    """执行方案生成（直接调用模板填充引擎）。
+
+    自动读取 intent.json 中的 intent_goal，填充五大方案模板。
+    结果自动写入 outputs/{session_id}/plans.json。
+
+    Args:
+        intent_file: intent.json 文件路径（可省略，自动从当前会话读取）。
+                     推荐用法：先调用 get_pipeline_file("intent") 获取路径再传入。
+
+    Returns:
+        {plans, rules} 或 {error}
+    """
+    # 读取 intent_goal
+    if intent_file:
+        intent_path = Path(intent_file)
+        if not intent_path.exists():
+            return {
+                "error": f"文件不存在: {intent_file}。请停止并告知用户：intent 阶段未生成产出文件。"
+            }
+        try:
+            raw = json.loads(intent_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            return {"error": f"文件格式错误: {intent_file}，无法解析 JSON。"}
+        if isinstance(raw, dict) and "intent_goal" in raw:
+            intent_goal = raw["intent_goal"]
+        else:
+            intent_goal = raw if isinstance(raw, dict) else {}
+    else:
+        intent_goal = _read_intent_goal()
+
+    if not intent_goal:
+        return {
+            "error": "无法读取 intent_goal，请确保意图解析阶段已完成且 intent.json 存在。"
+        }
+
+    generate_mod = _load_script_module("plan_generator/scripts/generate.py")
+    results = asyncio.run(generate_mod.fill_all_templates(intent_goal))
+    rules = generate_mod.load_filling_rules()
+
+    result: dict[str, Any] = {"plans": results, "rules": rules[:500]}
+    _persist_stage("plans", result)
+    return result
 
 
 def check_constraints(

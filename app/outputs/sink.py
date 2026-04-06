@@ -45,6 +45,12 @@ def get_current_session_id() -> str | None:
     return _current_session_id
 
 
+def set_current_session_id(session_id: str) -> None:
+    """显式设置当前会话 ID（由 UI 层在对话开始时调用）。"""
+    global _current_session_id
+    _current_session_id = session_id
+
+
 def _resolve_session_dir(session_id: str | None) -> Path:
     sid = session_id or "unknown"
     session_dir = _OUTPUTS_ROOT / sid
