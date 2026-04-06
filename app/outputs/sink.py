@@ -1,20 +1,21 @@
 """OutputSink — 阶段产出物持久化
 
-通过 Agno tool_hooks 机制拦截 get_skill_script 的执行结果，
-将四个阶段产出物按 session_id 分目录写入 outputs/。
+落盘有两条路径（互为冗余）：
+  1. 直接工具落盘（主路径）：analyze_intent / generate_plans / check_constraints /
+     translate_configs 内部调用 _persist_stage() 直接写文件
+  2. Hook 兜底（遗留路径）：output_sink_hook 拦截 get_skill_script 调用，
+     从 stdout JSON 提取结果写文件。仅当 Agent 绕过直接工具走 Skill 脚本时触发
 
-设计原则：
-  - Skills 脚本保持纯 stdout，完全不感知 session 或文件路径
-  - session_id 由 Agno 框架通过 run_context 注入，不经过 Skills 层
-  - hook 纯观测，原样返回结果，不影响 Agent 任何逻辑
+session_id 管理：
+  - UI 层在对话开始时通过 set_current_session_id() 设置
+  - Hook 从 Agno RunContext 同步更新
 
 输出结构：
-  outputs/
-  └── {session_id}/
-      ├── intent.json       ← intent_profiler/scripts/analyze.py
-      ├── plans.json        ← plan_generator/scripts/generate.py
-      ├── constraint.json   ← constraint_checker/scripts/validate.py
-      └── configs.json      ← config_translator/scripts/translate.py
+  outputs/{session_id}/
+    ├── intent.json       ← analyze_intent
+    ├── plans.json        ← generate_plans
+    ├── constraint.json   ← check_constraints
+    └── configs.json      ← translate_configs
 """
 from __future__ import annotations
 

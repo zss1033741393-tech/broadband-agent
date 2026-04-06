@@ -1,11 +1,17 @@
 """共享工具函数 — 供各子 Agent 注册使用
 
-包含：
-  get_pipeline_file  — 获取上一阶段产出文件路径（缺失时报错，禁止编造）
-  analyze_intent     — 直接 Python 意图解析 + 画像补全 + 自动落盘 intent.json
-  generate_plans     — 直接 Python 方案生成 + 自动落盘 plans.json
-  check_constraints  — 直接 Python 约束校验 + 自动落盘 constraint.json
-  translate_configs  — 直接 Python 配置转译 + 自动落盘 configs.json
+调用链路（sync 全程，无 async）：
+  Gradio async → Agno arun(async) → run_in_executor → 工具函数(sync)
+  Agno 在 async 环境中通过线程池执行 sync 工具，工具内部禁止调用 asyncio.run()。
+
+工具清单（全部 sync def，Agno 自动线程池调度）：
+  get_pipeline_file  — 获取上一阶段产出文件路径
+  analyze_intent     — 意图解析 + 画像补全 → intent.json
+  generate_plans     — 五大方案并行填充   → plans.json
+  check_constraints  — 规则引擎约束校验   → constraint.json
+  translate_configs  — 字段映射配置转译   → configs.json
+
+落盘：每个工具调用后自动写入 outputs/{session_id}/{stage}.json。
 """
 from __future__ import annotations
 
