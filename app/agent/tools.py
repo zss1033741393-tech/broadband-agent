@@ -1,27 +1,29 @@
 """共享工具函数 — 供各子 Agent 注册使用
 
-调用链路（sync 全程，无 async）：
-  Gradio async → Agno arun(async) → run_in_executor → 工具函数(sync)
-  Agno 在 async 环境中通过线程池执行 sync 工具，工具内部禁止调用 asyncio.run()。
+调用链路（async 外壳 + sync 内部）：
+  Gradio async → Agno arun(async) → iscoroutinefunction=True → await aexecute()
+    → @_guarded async wrapper → asyncio.to_thread(sync_fn) → 单线程执行同步 I/O
 
-工具清单（全部 sync def，Agno 自动线程池调度）：
-  get_pipeline_file  — 获取上一阶段产出文件路径
+工具清单（@_guarded 包装为 async def，Agno 直接 await 无额外线程）：
+  get_pipeline_file  — 获取上一阶段产出文件路径（sync，无需 @_guarded）
   analyze_intent     — 意图解析 + 画像补全 → intent.json
   generate_plans     — 五大方案并行填充   → plans.json
   check_constraints  — 规则引擎约束校验   → constraint.json
   translate_configs  — 字段映射配置转译   → configs.json
 
-容错：每个工具通过 _guarded() 包装，单个工具超时/崩溃返回 error dict，
-不阻塞其他工具和整个 agent 流程。超时秒数由 pipeline.tool_timeout_sec 控制。
+容错：@_guarded 通过 asyncio.wait_for 提供超时保护，asyncio.to_thread 隔离
+同步 I/O。单个工具超时/崩溃返回 error dict，不阻塞 event loop。
+超时秒数由 pipeline.tool_timeout_sec 控制。
 落盘：每个工具调用后自动写入 outputs/{session_id}/{stage}.json。
 """
 from __future__ import annotations
 
+import asyncio
 import functools
 import importlib.util
 import json
 import logging
-from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
@@ -41,34 +43,37 @@ _TOOL_TIMEOUT = cfg.pipeline.tool_timeout_sec
 # ─────────────────────────────────────────────────────────────
 
 def _guarded(fn):
-    """超时 + 异常保护装饰器。
+    """Async 超时 + 异常保护装饰器。
 
-    在独立线程中执行工具函数，超时或异常时返回 {error: ...}，
-    不会阻塞 Agno agent 循环或影响其他工具调用。
+    返回 async def wrapper，使 Agno 通过 iscoroutinefunction 检测后
+    直接 await aexecute()，不再额外创建线程。实际同步工作通过
+    asyncio.to_thread 在单个线程中执行，asyncio.wait_for 提供超时保护。
     """
     @functools.wraps(fn)
-    def wrapper(*args, **kwargs):
-        with ThreadPoolExecutor(max_workers=1) as pool:
-            future = pool.submit(fn, *args, **kwargs)
-            try:
-                return future.result(timeout=_TOOL_TIMEOUT)
-            except FuturesTimeout:
-                logger.error("工具 %s 执行超时 (>%ds)", fn.__name__, _TOOL_TIMEOUT)
-                return {
-                    "error": f"工具 {fn.__name__} 执行超时（>{_TOOL_TIMEOUT}s）。"
-                             "请将此错误反馈给用户，不要自行重试。"
-                }
-            except Exception as exc:
-                logger.exception("工具 %s 执行异常", fn.__name__)
-                return {
-                    "error": f"工具 {fn.__name__} 执行失败: {exc}。"
-                             "请将此错误反馈给用户，不要自行重试。"
-                }
+    async def wrapper(*args, **kwargs):
+        try:
+            return await asyncio.wait_for(
+                asyncio.to_thread(fn, *args, **kwargs),
+                timeout=_TOOL_TIMEOUT,
+            )
+        except asyncio.TimeoutError:
+            logger.error("工具 %s 执行超时 (>%ds)", fn.__name__, _TOOL_TIMEOUT)
+            return {
+                "error": f"工具 {fn.__name__} 执行超时（>{_TOOL_TIMEOUT}s）。"
+                         "请将此错误反馈给用户，不要自行重试。"
+            }
+        except Exception as exc:
+            logger.exception("工具 %s 执行异常", fn.__name__)
+            return {
+                "error": f"工具 {fn.__name__} 执行失败: {exc}。"
+                         "请将此错误反馈给用户，不要自行重试。"
+            }
     return wrapper
 
 
+@functools.lru_cache(maxsize=8)
 def _load_script_module(relative_path: str):
-    """通过 importlib 按路径加载 skills/ 下的脚本模块"""
+    """通过 importlib 按路径加载 skills/ 下的脚本模块（首次加载后缓存）"""
     script_path = SKILLS_DIR / relative_path
     spec = importlib.util.spec_from_file_location("_skill_script", script_path)
     module = importlib.util.module_from_spec(spec)
