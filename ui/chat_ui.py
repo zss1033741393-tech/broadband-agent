@@ -198,6 +198,8 @@ class _MessageBuilder:
         self._tool_count = 0
         self._current_agent_id: str | None = None
         self._tool_start_time: float | None = None
+        # 暂存被工具打断的 member_answer，工具结束后放回末尾
+        self._stashed_member: ChatMessage | None = None
 
     # ── 事件处理 ──────────────────────────────────────────────
 
@@ -251,8 +253,19 @@ class _MessageBuilder:
             self._messages.append(msg)
 
     def on_member_content_delta(self, delta: str) -> None:
-        """子 Agent 回复 — 嵌套在 Agent 块内但不折叠（普通文本）"""
+        """子 Agent 回复 — 嵌套在 Agent 块内但不折叠（普通文本）
+
+        如果有被工具打断暂存的 member_answer，恢复到末尾继续追加，
+        保证正文始终完整显示在工具块下方。
+        """
         self._close_tag(_TAG_THINKING)
+        # 恢复被工具暂存的 member_answer
+        if self._stashed_member is not None:
+            msg = self._stashed_member
+            self._stashed_member = None
+            msg.content += delta
+            self._messages.append(msg)
+            return
         msg = self._find_active(_TAG_MEMBER_ANSWER)
         if msg:
             msg.content += delta
@@ -269,7 +282,15 @@ class _MessageBuilder:
     def on_tool_start(self, name: str, args: dict[str, Any]) -> None:
         self._close_tag(_TAG_PLAN)
         self._close_tag(_TAG_THINKING)
-        self._close_tag(_TAG_MEMBER_ANSWER)
+        # 暂存正在输出的 member_answer（从列表中移除），工具结束后放回末尾
+        # 这样工具渲染在前，正文连续渲染在后，不会被打断
+        if self._stashed_member is None:
+            active = self._find_active(_TAG_MEMBER_ANSWER)
+            if active and active.content.strip():
+                self._messages.remove(active)
+                self._stashed_member = active
+            else:
+                self._close_tag(_TAG_MEMBER_ANSWER)
         self._tool_start_time = time.monotonic()
 
         self._tool_count += 1
@@ -394,6 +415,11 @@ class _MessageBuilder:
         if self._current_agent_id is None:
             return
         self._close_tag(_TAG_THINKING)
+        # 恢复暂存的 member_answer（被工具打断但未续写的情况）
+        if self._stashed_member is not None:
+            self._stashed_member._closed = True  # type: ignore[attr-defined]
+            self._messages.append(self._stashed_member)
+            self._stashed_member = None
         self._close_tag(_TAG_MEMBER_ANSWER)
         # Plan 是顶级块，不归属于 Agent，在此不关闭
         for msg in reversed(self._messages):
