@@ -211,20 +211,23 @@ def generate_plans(
         }
 
     generate_mod = _load_script_module("plan_generator/scripts/generate.py")
-    # 同步调用（fill_all_templates 内部无真实 I/O，仅 JSON 操作）
-    # 不用 asyncio.run()，避免 "cannot be called from a running event loop"
-    results = []
-    for tpl_name in generate_mod.TEMPLATE_FILES:
+    # 线程池并行填充 5 个模板（不用 asyncio.run，避免 event loop ���突）
+    from concurrent.futures import ThreadPoolExecutor
+
+    def _fill_one(tpl_name: str) -> dict[str, Any]:
         template = generate_mod.load_template(tpl_name)
         params = generate_mod.build_params_from_intent(intent_goal, tpl_name)
         filled, changes = generate_mod.fill_template(template, params)
-        results.append({
+        return {
             "plan_name": template.get("plan_name", tpl_name),
             "template": tpl_name,
             "filled_data": filled,
             "changes": changes,
             "status": "filled",
-        })
+        }
+
+    with ThreadPoolExecutor(max_workers=len(generate_mod.TEMPLATE_FILES)) as pool:
+        results = list(pool.map(_fill_one, generate_mod.TEMPLATE_FILES))
     rules = generate_mod.load_filling_rules()
 
     result: dict[str, Any] = {"plans": results, "rules": rules[:500]}
