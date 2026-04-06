@@ -146,6 +146,7 @@ _TOOL_LABELS: dict[str, str] = {
     "get_skill_script": "⚙️ 执行技能脚本",
     "get_skill_reference": "📚 读取参考资料",
     "get_pipeline_file": "📂 读取阶段产出",
+    "analyze_intent": "🎯 意图解析与画像补全",
     "generate_plans": "📝 生成优化方案",
     "check_constraints": "✅ 约束校验",
     "translate_configs": "🔄 配置转译",
@@ -268,6 +269,11 @@ class _MessageBuilder:
     def on_tool_start(self, name: str, args: dict[str, Any]) -> None:
         self._close_tag(_TAG_PLAN)
         self._close_tag(_TAG_THINKING)
+        # 工具启动前的 member content 是 Agent 推理过程，追溯添加折叠标题
+        active_member = self._find_active(_TAG_MEMBER_ANSWER)
+        if active_member and active_member.content.strip():
+            active_member.metadata["title"] = "💭 推理"
+            active_member.metadata["status"] = "done"
         self._close_tag(_TAG_MEMBER_ANSWER)
         self._tool_start_time = time.monotonic()
 

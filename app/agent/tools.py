@@ -2,6 +2,7 @@
 
 包含：
   get_pipeline_file  — 获取上一阶段产出文件路径（缺失时报错，禁止编造）
+  analyze_intent     — 直接 Python 意图解析 + 画像补全 + 自动落盘 intent.json
   generate_plans     — 直接 Python 方案生成 + 自动落盘 plans.json
   check_constraints  — 直接 Python 约束校验 + 自动落盘 constraint.json
   translate_configs  — 直接 Python 配置转译 + 自动落盘 configs.json
@@ -120,6 +121,56 @@ def get_pipeline_file(stage: str) -> str:
                      "请停止当前操作并告知用户：上一阶段可能执行失败，需要检查。"
         }, ensure_ascii=False)
     return str(path)
+
+
+def analyze_intent(
+    intent_goal: dict[str, Any],
+) -> dict[str, Any]:
+    """执行意图解析与画像补全。
+
+    根据用户输入的意图字段，加载画像模板，推断补全缺失字段，校验完整性。
+    结果自动写入 outputs/{session_id}/intent.json。
+
+    Args:
+        intent_goal: 从用户输入中提取的意图字段 dict，例如：
+            {
+                "user_type": "直播用户",
+                "scenario": "上行带宽保障",
+                "guarantee_target": {"sensitivity": "卡顿", "priority_level": "high"},
+                "guarantee_period": {"start_time": "20:00", "end_time": "00:00"}
+            }
+
+    Returns:
+        {complete, intent_goal, profile, missing_fields, followup, schema}
+        - complete=true 时意图完整，可进入下一阶段
+        - complete=false 时需根据 followup 追问用户
+    """
+    analyze_mod = _load_script_module("intent_profiler/scripts/analyze.py")
+
+    # 1. 加载画像模板，用已知意图字段填充
+    profile = analyze_mod.load_profile_template()
+    profile["user_profile"].update(
+        {k: v for k, v in intent_goal.items() if v}
+    )
+
+    # 2. 将画像推断结果合并回意图
+    intent_goal = analyze_mod.merge_intent_with_profile(intent_goal, profile)
+
+    # 3. 校验意图完整性
+    complete, missing = analyze_mod.validate_intent(intent_goal)
+    followup = analyze_mod.generate_followup_questions(missing) if not complete else ""
+    schema = analyze_mod.load_intent_schema()
+
+    result: dict[str, Any] = {
+        "complete": complete,
+        "intent_goal": intent_goal,
+        "profile": profile,
+        "missing_fields": missing,
+        "followup": followup,
+        "schema": schema,
+    }
+    _persist_stage("intent", result)
+    return result
 
 
 def generate_plans(
