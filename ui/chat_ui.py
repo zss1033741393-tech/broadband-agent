@@ -128,17 +128,8 @@ def _format_result(result: Any) -> str:
 
 
 # ─────────────────────────────────────────────────────────────
-# Claude 风格消息构建器
+# Claude 风格消息构建器（数据模型驱动）
 # ─────────────────────────────────────────────────────────────
-
-# 内部标记，用于在 _messages 列表中识别消息类型
-_TAG_THINKING = "_thinking"
-_TAG_TOOL = "_tool"
-_TAG_MEMBER_ANSWER = "_member_answer"
-_TAG_ANSWER = "_answer"
-_TAG_PLAN = "_plan"
-_TAG_AGENT = "_agent"
-_TAG_ERROR = "_error"
 
 # ── 工具名称 → 中文显示标题 ─────────────────────────────────
 _TOOL_LABELS: dict[str, str] = {
@@ -187,247 +178,251 @@ def _tool_display_title(name: str, args: dict[str, Any]) -> str:
 
 
 class _MessageBuilder:
-    """维护本轮对话的 ChatMessage 列表，支持折叠式渲染。
+    """数据模型驱动的消息构建器。
 
-    每个消息附带 _tag 属性（内部标记）和 _closed 属性（是否已完成）。
+    架构：事件 → 更新内部数据模型 → snapshot() 从数据模型渲染 ChatMessage 列表。
+    每次 snapshot() 都是全量重建，不依赖 ChatMessage 的可变状态。
+
+    数据模型：
+      plan         — 主控协调文本
+      agents[]     — 子 Agent 列表，每个含 items（思考/工具）+ content（正文）
+      answer       — 主控最终回答
+      errors[]     — 错误消息
+
+    渲染顺序保证（每个 Agent 内部）：
+      💭 思考(折叠) → 🔧 工具(折叠) → 💭 思考 → 🔧 工具 → ... → 📝 正文(不折叠，始终最后)
     """
 
     def __init__(self) -> None:
-        self._messages: list[ChatMessage] = []
+        self._plan = ""
+        self._plan_done = False
+        # 每个 agent: {name, id, items: [{type, ...}], content: str, status}
+        self._agents: list[dict[str, Any]] = []
+        self._answer = ""
+        self._errors: list[str] = []
         self._agent_id_counter = 0
-        self._tool_count = 0
-        self._current_agent_id: str | None = None
         self._tool_start_time: float | None = None
-        # 暂存被工具打断的 member_answer，工具结束后放回末尾
-        self._stashed_member: ChatMessage | None = None
 
-    # ── 事件处理 ──────────────────────────────────────────────
+    # ── 内部辅助 ─────────────────────────────────────────────
+
+    @property
+    def _current(self) -> dict[str, Any] | None:
+        """当前活跃的子 Agent（status=pending），没有则返回 None"""
+        if self._agents and self._agents[-1]["status"] == "pending":
+            return self._agents[-1]
+        return None
+
+    def _current_thinking(self, agent: dict[str, Any]) -> dict[str, Any] | None:
+        """当前 Agent 最后一个未关闭的 thinking 块"""
+        items = agent["items"]
+        if items and items[-1]["type"] == "thinking" and items[-1]["status"] == "pending":
+            return items[-1]
+        return None
+
+    def _close_thinking(self, agent: dict[str, Any]) -> None:
+        t = self._current_thinking(agent)
+        if t:
+            t["status"] = "done"
+
+    def _find_pending_tool(self, agent: dict[str, Any]) -> dict[str, Any] | None:
+        for item in reversed(agent["items"]):
+            if item["type"] == "tool" and item["status"] == "pending":
+                return item
+        return None
+
+    def _close_agent(self, agent: dict[str, Any]) -> None:
+        self._close_thinking(agent)
+        agent["status"] = "done"
+
+    # ── 事件处理（公开接口，与 _stream_chat 事件分发对应）──
 
     def on_member_start(self, member_name: str) -> None:
         """主控委托给子 Agent"""
-        self._close_current_agent()
-        self._close_tag(_TAG_PLAN)
+        if self._current:
+            self._close_agent(self._current)
+        self._plan_done = True
         self._agent_id_counter += 1
-        self._current_agent_id = f"agent_{self._agent_id_counter}"
-        msg = ChatMessage(
-            content="",
-            metadata={
-                "title": f"🤖 {member_name}",
-                "status": "pending",
-                "id": self._current_agent_id,
-            },
-        )
-        msg._tag = _TAG_AGENT  # type: ignore[attr-defined]
-        msg._closed = False  # type: ignore[attr-defined]
-        self._messages.append(msg)
+        self._agents.append({
+            "name": member_name,
+            "id": f"agent_{self._agent_id_counter}",
+            "items": [],
+            "content": "",
+            "status": "pending",
+        })
 
     def on_plan(self, delta: str) -> None:
         """主控委托前的规划文本"""
-        msg = self._find_active(_TAG_PLAN)
-        if msg:
-            msg.content += delta
-        else:
-            msg = ChatMessage(
-                content=delta,
-                metadata={
-                    "title": "📋 协调",
-                    "status": "pending",
-                },
-            )
-            msg._tag = _TAG_PLAN  # type: ignore[attr-defined]
-            msg._closed = False  # type: ignore[attr-defined]
-            self._messages.append(msg)
+        self._plan += delta
 
     def on_thinking_delta(self, delta: str) -> None:
-        """thinking delta（reasoning / <think> / intermediate）"""
-        msg = self._find_active(_TAG_THINKING)
-        if msg:
-            msg.content += delta
+        """思考内容（reasoning / <think> / intermediate）"""
+        agent = self._current
+        if not agent:
+            return
+        t = self._current_thinking(agent)
+        if t:
+            t["text"] += delta
         else:
-            metadata: dict[str, Any] = {"title": "💭 思考", "status": "pending"}
-            if self._current_agent_id:
-                metadata["parent_id"] = self._current_agent_id
-            msg = ChatMessage(content=delta, metadata=metadata)
-            msg._tag = _TAG_THINKING  # type: ignore[attr-defined]
-            msg._closed = False  # type: ignore[attr-defined]
-            self._messages.append(msg)
+            agent["items"].append({
+                "type": "thinking", "text": delta, "status": "pending",
+            })
 
     def on_member_content_delta(self, delta: str) -> None:
-        """子 Agent 回复 — 嵌套在 Agent 块内但不折叠（普通文本）
-
-        如果有被工具打断暂存的 member_answer，恢复到末尾继续追加，
-        保证正文始终完整显示在工具块下方。
-        """
-        self._close_tag(_TAG_THINKING)
-        # 恢复被工具暂存的 member_answer
-        if self._stashed_member is not None:
-            msg = self._stashed_member
-            self._stashed_member = None
-            msg.content += delta
-            self._messages.append(msg)
+        """子 Agent 正文 — 累积到 content 字段，snapshot 时始终渲染在工具之后"""
+        agent = self._current
+        if not agent:
             return
-        msg = self._find_active(_TAG_MEMBER_ANSWER)
-        if msg:
-            msg.content += delta
-        else:
-            # parent_id 但无 title → 嵌套在 Agent 块内，不折叠
-            metadata: dict[str, Any] = {}
-            if self._current_agent_id:
-                metadata["parent_id"] = self._current_agent_id
-            msg = ChatMessage(content=delta, metadata=metadata)
-            msg._tag = _TAG_MEMBER_ANSWER  # type: ignore[attr-defined]
-            msg._closed = False  # type: ignore[attr-defined]
-            self._messages.append(msg)
+        self._close_thinking(agent)
+        agent["content"] += delta
 
     def on_tool_start(self, name: str, args: dict[str, Any]) -> None:
-        self._close_tag(_TAG_PLAN)
-        self._close_tag(_TAG_THINKING)
-        # 暂存正在输出的 member_answer（从列表中移除），工具结束后放回末尾
-        # 这样工具渲染在前，正文连续渲染在后，不会被打断
-        if self._stashed_member is None:
-            active = self._find_active(_TAG_MEMBER_ANSWER)
-            if active and active.content.strip():
-                self._messages.remove(active)
-                self._stashed_member = active
-            else:
-                self._close_tag(_TAG_MEMBER_ANSWER)
+        """工具调用开始"""
+        agent = self._current
+        if agent:
+            self._close_thinking(agent)
         self._tool_start_time = time.monotonic()
 
-        self._tool_count += 1
         args_clean = {k: v for k, v in args.items() if k not in ("args", "kwargs")}
-        if args_clean:
-            args_str = json.dumps(args_clean, ensure_ascii=False, indent=2)
-            content = f"**参数**\n```json\n{args_str}\n```\n\n*执行中...*"
-        else:
-            content = "*执行中...*"
-
-        title = _tool_display_title(name, args)
-        metadata: dict[str, Any] = {"title": title, "status": "pending"}
-        if self._current_agent_id:
-            metadata["parent_id"] = self._current_agent_id
-
-        msg = ChatMessage(content=content, metadata=metadata)
-        msg._tag = _TAG_TOOL  # type: ignore[attr-defined]
-        msg._closed = False  # type: ignore[attr-defined]
-        self._messages.append(msg)
+        content = (
+            f"**参数**\n```json\n{json.dumps(args_clean, ensure_ascii=False, indent=2)}\n```\n\n*执行中...*"
+            if args_clean else "*执行中...*"
+        )
+        item: dict[str, Any] = {
+            "type": "tool",
+            "title": _tool_display_title(name, args),
+            "content": content,
+            "status": "pending",
+            "duration": None,
+        }
+        if agent:
+            agent["items"].append(item)
 
     def on_tool_complete(self, name: str, result: Any) -> None:
-        msg = self._find_last_pending_tool()
-        if msg is None:
+        """工具调用完成"""
+        agent = self._current
+        if not agent:
             return
-        msg.content = msg.content.replace("\n\n*执行中...*", "").replace("*执行中...*", "")
+        tool = self._find_pending_tool(agent)
+        if not tool:
+            return
+        tool["content"] = tool["content"].replace("\n\n*执行中...*", "").replace("*执行中...*", "")
         result_str = _format_result(result)
-        msg.content += f"\n\n✅ **返回**\n```\n{result_str}\n```"
-        msg.metadata["status"] = "done"
+        tool["content"] += f"\n\n✅ **返回**\n```\n{result_str}\n```"
+        tool["status"] = "done"
         if self._tool_start_time is not None:
-            duration = time.monotonic() - self._tool_start_time
-            msg.metadata["duration"] = round(duration, 1)
+            tool["duration"] = round(time.monotonic() - self._tool_start_time, 1)
             self._tool_start_time = None
-        msg._closed = True  # type: ignore[attr-defined]
 
     def on_tool_error(self, name: str, error: str) -> None:
-        msg = self._find_last_pending_tool()
-        if msg is None:
+        """工具调用出错"""
+        agent = self._current
+        if not agent:
             return
-        msg.content = msg.content.replace("\n\n*执行中...*", "").replace("*执行中...*", "")
-        msg.content += f"\n\n❌ **错误** `{error}`"
-        msg.metadata["status"] = "done"
+        tool = self._find_pending_tool(agent)
+        if not tool:
+            return
+        tool["content"] = tool["content"].replace("\n\n*执行中...*", "").replace("*执行中...*", "")
+        tool["content"] += f"\n\n❌ **错误** `{error}`"
+        tool["status"] = "done"
         if self._tool_start_time is not None:
-            duration = time.monotonic() - self._tool_start_time
-            msg.metadata["duration"] = round(duration, 1)
+            tool["duration"] = round(time.monotonic() - self._tool_start_time, 1)
             self._tool_start_time = None
-        msg._closed = True  # type: ignore[attr-defined]
 
     def on_answer_delta(self, delta: str) -> None:
-        """主控最终回答（TeamRunEvent.run_content）— 不折叠
-
-        关闭当前 Agent 块 + 插入分隔线，在最终回答前形成明确的视觉分割点。
-        """
-        self._close_tag(_TAG_MEMBER_ANSWER)
-        self._close_tag(_TAG_THINKING)
-        self._close_tag(_TAG_PLAN)
-        self._close_current_agent()
-        msg = self._find_active(_TAG_ANSWER)
-        if msg:
-            msg.content += delta
-        else:
-            # 分隔线：在最终回答前插入 <hr>，拉开与折叠块的视觉距离
-            if self._messages:
-                sep = ChatMessage(content="\n---\n")
-                sep._tag = "_sep"  # type: ignore[attr-defined]
-                sep._closed = True  # type: ignore[attr-defined]
-                self._messages.append(sep)
-            msg = ChatMessage(content=delta)
-            msg._tag = _TAG_ANSWER  # type: ignore[attr-defined]
-            msg._closed = False  # type: ignore[attr-defined]
-            self._messages.append(msg)
+        """主控最终回答"""
+        if self._current:
+            self._close_agent(self._current)
+        self._plan_done = True
+        self._answer += delta
 
     def on_error(self, error_msg: str) -> None:
-        msg = ChatMessage(
-            content=f"**错误**\n\n{error_msg}",
-            metadata={"title": "❌ 错误", "status": "done"},
-        )
-        msg._tag = _TAG_ERROR  # type: ignore[attr-defined]
-        msg._closed = True  # type: ignore[attr-defined]
-        self._messages.append(msg)
+        self._errors.append(error_msg)
 
     def finalize(self) -> None:
-        """流结束后调用，关闭所有未完成的块"""
-        self._close_current_agent()
-        self._close_tag(_TAG_PLAN)
-        self._close_tag(_TAG_ANSWER)
+        """流结束，关闭所有未完成块"""
+        if self._current:
+            self._close_agent(self._current)
+        self._plan_done = True
 
-    # ── 快照（供 yield） ─────────────────────────────────────
+    # ── 渲染：从数据模型生成 ChatMessage 列表 ────────────────
 
     def snapshot(self) -> list[ChatMessage]:
-        """返回当前消息列表的浅拷贝"""
-        return list(self._messages)
+        """全量重建 ChatMessage 列表。
 
-    # ── 内部工具 ─────────────────────────────────────────────
+        渲染顺序：
+          📋 协调（折叠）
+          🤖 Agent 1（折叠）
+            💭 思考（折叠，嵌套）
+            🔧 工具（折叠，嵌套）
+            📝 正文（不折叠，嵌套，始终在最后）
+          🤖 Agent 2（折叠）
+            ...
+          ─── 分隔线 ───
+          💬 最终回答（不折叠）
+        """
+        msgs: list[ChatMessage] = []
 
-    def _find_active(self, tag: str) -> ChatMessage | None:
-        """查找最后一个未关闭的指定类型消息"""
-        for msg in reversed(self._messages):
-            t = getattr(msg, "_tag", None)
-            if t == tag:
-                if not getattr(msg, "_closed", True):
-                    return msg
-                return None  # 找到但已关闭
-        return None
+        # 1. 主控协调
+        if self._plan.strip():
+            msgs.append(ChatMessage(
+                content=self._plan,
+                metadata={"title": "📋 协调", "status": "done" if self._plan_done else "pending"},
+            ))
 
-    def _find_last_pending_tool(self) -> ChatMessage | None:
-        """查找最后一个 pending 状态的工具消息"""
-        for msg in reversed(self._messages):
-            if getattr(msg, "_tag", None) == _TAG_TOOL and not getattr(msg, "_closed", True):
-                return msg
-        return None
+        # 2. 子 Agent 块
+        for agent in self._agents:
+            # Agent 手风琴（父级）
+            msgs.append(ChatMessage(
+                content="",
+                metadata={
+                    "title": f"🤖 {agent['name']}",
+                    "status": agent["status"],
+                    "id": agent["id"],
+                },
+            ))
 
-    def _close_tag(self, tag: str) -> None:
-        """关闭指定类型的最后一个活跃消息"""
-        msg = self._find_active(tag)
-        if msg:
-            msg._closed = True  # type: ignore[attr-defined]
-            if hasattr(msg, "metadata") and isinstance(msg.metadata, dict) and "status" in msg.metadata:
-                msg.metadata["status"] = "done"
+            # items：思考 + 工具（保持原始顺序）
+            for item in agent["items"]:
+                if item["type"] == "thinking" and item["text"].strip():
+                    msgs.append(ChatMessage(
+                        content=item["text"],
+                        metadata={
+                            "title": "💭 思考",
+                            "status": item["status"],
+                            "parent_id": agent["id"],
+                        },
+                    ))
+                elif item["type"] == "tool":
+                    meta: dict[str, Any] = {
+                        "title": item["title"],
+                        "status": item["status"],
+                        "parent_id": agent["id"],
+                    }
+                    if item["duration"] is not None:
+                        meta["duration"] = item["duration"]
+                    msgs.append(ChatMessage(content=item["content"], metadata=meta))
 
-    def _close_current_agent(self) -> None:
-        """关闭当前活跃的 Agent 块及其内部所有子块"""
-        if self._current_agent_id is None:
-            return
-        self._close_tag(_TAG_THINKING)
-        # 恢复暂存的 member_answer（被工具打断但未续写的情况）
-        if self._stashed_member is not None:
-            self._stashed_member._closed = True  # type: ignore[attr-defined]
-            self._messages.append(self._stashed_member)
-            self._stashed_member = None
-        self._close_tag(_TAG_MEMBER_ANSWER)
-        # Plan 是顶级块，不归属于 Agent，在此不关闭
-        for msg in reversed(self._messages):
-            if getattr(msg, "_tag", None) == _TAG_AGENT and not getattr(msg, "_closed", True):
-                msg._closed = True  # type: ignore[attr-defined]
-                msg.metadata["status"] = "done"
-                break
-        self._current_agent_id = None
+            # 正文（始终在 items 之后，不折叠）
+            if agent["content"].strip():
+                msgs.append(ChatMessage(
+                    content=agent["content"],
+                    metadata={"parent_id": agent["id"]},
+                ))
+
+        # 3. 分隔线 + 最终回答
+        if self._answer.strip():
+            if msgs:
+                msgs.append(ChatMessage(content="\n---\n"))
+            msgs.append(ChatMessage(content=self._answer))
+
+        # 4. 错误
+        for err in self._errors:
+            msgs.append(ChatMessage(
+                content=f"**错误**\n\n{err}",
+                metadata={"title": "❌ 错误", "status": "done"},
+            ))
+
+        return msgs
 
 
 # ─────────────────────────────────────────────────────────────
