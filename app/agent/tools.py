@@ -9,7 +9,6 @@
 """
 from __future__ import annotations
 
-import asyncio
 import importlib.util
 import json
 import logging
@@ -212,7 +211,20 @@ def generate_plans(
         }
 
     generate_mod = _load_script_module("plan_generator/scripts/generate.py")
-    results = asyncio.run(generate_mod.fill_all_templates(intent_goal))
+    # 同步调用（fill_all_templates 内部无真实 I/O，仅 JSON 操作）
+    # 不用 asyncio.run()，避免 "cannot be called from a running event loop"
+    results = []
+    for tpl_name in generate_mod.TEMPLATE_FILES:
+        template = generate_mod.load_template(tpl_name)
+        params = generate_mod.build_params_from_intent(intent_goal, tpl_name)
+        filled, changes = generate_mod.fill_template(template, params)
+        results.append({
+            "plan_name": template.get("plan_name", tpl_name),
+            "template": tpl_name,
+            "filled_data": filled,
+            "changes": changes,
+            "status": "filled",
+        })
     rules = generate_mod.load_filling_rules()
 
     result: dict[str, Any] = {"plans": results, "rules": rules[:500]}
