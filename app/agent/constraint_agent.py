@@ -1,11 +1,10 @@
-"""ConstraintAgent — 约束校验（阶段3，可选）"""
+"""ConstraintAgent — 约束校验（阶段3）"""
 from __future__ import annotations
 
 from agno.agent import Agent
-from agno.skills import LocalSkills, Skills
 
 from app.outputs.sink import output_sink_hook
-from .tools import get_pipeline_file, check_constraints, SKILLS_DIR
+from .tools import get_pipeline_file, check_constraints, discover_extra_skills
 
 CONSTRAINT_PROMPT = """\
 你是约束校验专家。处理流程：
@@ -26,15 +25,11 @@ CONSTRAINT_PROMPT = """\
 
 
 def build_constraint_agent(model, num_history_runs: int, debug_mode: bool) -> Agent:
-    skills = Skills(loaders=[
-        LocalSkills(path=str(SKILLS_DIR / "constraint_checker"), validate=False),
-        LocalSkills(path=str(SKILLS_DIR / "domain_expert"), validate=False),
-    ])
     return Agent(
         name="ConstraintAgent",
         role="约束校验",
         model=model,
-        skills=skills,
+        skills=discover_extra_skills(),
         tools=[get_pipeline_file, check_constraints],
         instructions=CONSTRAINT_PROMPT,
         add_history_to_context=True,

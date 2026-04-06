@@ -2,10 +2,9 @@
 from __future__ import annotations
 
 from agno.agent import Agent
-from agno.skills import LocalSkills, Skills
 
 from app.outputs.sink import output_sink_hook
-from .tools import get_pipeline_file, translate_configs, SKILLS_DIR
+from .tools import get_pipeline_file, translate_configs, discover_extra_skills
 
 CONFIG_PROMPT = """\
 你是配置转译专家。处理流程：
@@ -25,15 +24,11 @@ CONFIG_PROMPT = """\
 
 
 def build_config_agent(model, num_history_runs: int, debug_mode: bool) -> Agent:
-    skills = Skills(loaders=[
-        LocalSkills(path=str(SKILLS_DIR / "config_translator"), validate=False),
-        LocalSkills(path=str(SKILLS_DIR / "domain_expert"), validate=False),
-    ])
     return Agent(
         name="ConfigAgent",
         role="配置转译",
         model=model,
-        skills=skills,
+        skills=discover_extra_skills(),
         tools=[get_pipeline_file, translate_configs],
         instructions=CONFIG_PROMPT,
         add_history_to_context=True,

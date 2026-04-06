@@ -2,10 +2,9 @@
 from __future__ import annotations
 
 from agno.agent import Agent
-from agno.skills import LocalSkills, Skills
 
 from app.outputs.sink import output_sink_hook
-from .tools import get_pipeline_file, generate_plans, SKILLS_DIR
+from .tools import get_pipeline_file, generate_plans, discover_extra_skills
 
 PLAN_PROMPT = """\
 你是方案生成专家。处理流程：
@@ -24,15 +23,11 @@ PLAN_PROMPT = """\
 
 
 def build_plan_agent(model, num_history_runs: int, debug_mode: bool) -> Agent:
-    skills = Skills(loaders=[
-        LocalSkills(path=str(SKILLS_DIR / "plan_generator"), validate=False),
-        LocalSkills(path=str(SKILLS_DIR / "domain_expert"), validate=False),
-    ])
     return Agent(
         name="PlanAgent",
         role="方案生成",
         model=model,
-        skills=skills,
+        skills=discover_extra_skills(),
         tools=[get_pipeline_file, generate_plans],
         instructions=PLAN_PROMPT,
         add_history_to_context=True,

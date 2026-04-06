@@ -348,3 +348,32 @@ def translate_configs(
     # 自动落盘 configs.json
     _persist_stage("configs", result)
     return result
+
+
+# ─────────────────────────────────────────────────────────────
+# Skill 自动发现 — 流水线 Skill 用直接工具，其余走 Agno 原生机制
+# ─────────────────────────────────────────────────────────────
+
+# 已有直接工具的 4 个流水线 Skill，不再通过 LocalSkills 加载
+# （避免 get_skill_script 与直接工具重复，混淆模型选择）
+_PIPELINE_SKILLS = {"intent_profiler", "plan_generator", "constraint_checker", "config_translator"}
+
+
+def discover_extra_skills():
+    """自动扫描 skills/ 下非流水线的 Skill，返回 Skills 实例。
+
+    流水线 Skill（intent_profiler 等）已有直接 Python 工具，不加载。
+    其余 Skill（domain_expert + 未来新增）通过 Agno 原生机制注册，
+    Agent 可通过 get_skill_instructions / get_skill_reference / get_skill_script 使用。
+
+    新增 Skill 只需放到 skills/ 目录 + 写 SKILL.md，无需改 Python 代码。
+    """
+    from agno.skills import LocalSkills, Skills
+
+    loaders = []
+    for child in sorted(SKILLS_DIR.iterdir()):
+        if child.is_dir() and (child / "SKILL.md").exists():
+            if child.name not in _PIPELINE_SKILLS:
+                loaders.append(LocalSkills(path=str(child), validate=False))
+                logger.info("discover_extra_skills: 加载 %s", child.name)
+    return Skills(loaders=loaders) if loaders else None

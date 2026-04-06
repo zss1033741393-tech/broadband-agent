@@ -2,10 +2,9 @@
 from __future__ import annotations
 
 from agno.agent import Agent
-from agno.skills import LocalSkills, Skills
 
 from app.outputs.sink import output_sink_hook
-from .tools import get_pipeline_file, analyze_intent, SKILLS_DIR
+from .tools import get_pipeline_file, analyze_intent, discover_extra_skills
 
 INTENT_PROMPT = """\
 你是意图解析与用户画像专家。处理流程：
@@ -14,7 +13,7 @@ INTENT_PROMPT = """\
 3. 意图不完整（complete=false）时用返回的 followup 追问用户（每轮≤3字段，最多3轮）
 4. 收到用户补充信息后，将新信息合并到 intent_goal 中再次调用 analyze_intent
 5. complete=true 后返回结构化结果，不执行其他操作
-6. 需要理解专业术语时，可查阅 domain_expert 的 glossary.md
+6. ��要理解专业术语时，可通过 get_skill_reference("domain_expert", "glossary.md") 查阅
 
 严禁事项：
 - 禁止跳过 analyze_intent 工具自行编造意图或画像数据
@@ -24,15 +23,11 @@ INTENT_PROMPT = """\
 
 
 def build_intent_agent(model, num_history_runs: int, debug_mode: bool) -> Agent:
-    skills = Skills(loaders=[
-        LocalSkills(path=str(SKILLS_DIR / "intent_profiler"), validate=False),
-        LocalSkills(path=str(SKILLS_DIR / "domain_expert"), validate=False),
-    ])
     return Agent(
         name="IntentAgent",
         role="意图解析与用户画像",
         model=model,
-        skills=skills,
+        skills=discover_extra_skills(),
         tools=[get_pipeline_file, analyze_intent],
         instructions=INTENT_PROMPT,
         add_history_to_context=True,
