@@ -16,6 +16,7 @@
 超时秒数由 pipeline.tool_timeout_sec 控制。
 落盘：每个工具调用后自动写入 outputs/{session_id}/{stage}.json。
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -42,6 +43,7 @@ _TOOL_TIMEOUT = cfg.pipeline.tool_timeout_sec
 # 内部工具
 # ─────────────────────────────────────────────────────────────
 
+
 def _guarded(fn):
     """Async 超时 + 异常保护装饰器。
 
@@ -49,6 +51,7 @@ def _guarded(fn):
     直接 await aexecute()，不再额外创建线程。实际同步工作通过
     asyncio.to_thread 在单个线程中执行，asyncio.wait_for 提供超时保护。
     """
+
     @functools.wraps(fn)
     async def wrapper(*args, **kwargs):
         try:
@@ -60,14 +63,14 @@ def _guarded(fn):
             logger.error("工具 %s 执行超时 (>%ds)", fn.__name__, _TOOL_TIMEOUT)
             return {
                 "error": f"工具 {fn.__name__} 执行超时（>{_TOOL_TIMEOUT}s）。"
-                         "请将此错误反馈给用户，不要自行重试。"
+                "请将此错误反馈给用户，不要自行重试。"
             }
         except Exception as exc:
             logger.exception("工具 %s 执行异常", fn.__name__)
             return {
-                "error": f"工具 {fn.__name__} 执行失败: {exc}。"
-                         "请将此错误反馈给用户，不要自行重试。"
+                "error": f"工具 {fn.__name__} 执行失败: {exc}。请将此错误反馈给用户，不要自行重试。"
             }
+
     return wrapper
 
 
@@ -129,6 +132,7 @@ def _read_intent_goal() -> dict[str, Any]:
 # 公开工具函数
 # ─────────────────────────────────────────────────────────────
 
+
 def get_pipeline_file(stage: str) -> str:
     """获取本会话某阶段产出文件的路径。
 
@@ -144,24 +148,33 @@ def get_pipeline_file(stage: str) -> str:
     """
     valid_stages = {"intent", "plans", "constraint", "configs"}
     if stage not in valid_stages:
-        return json.dumps({
-            "error": f"无效的 stage '{stage}'，合法值为：{', '.join(sorted(valid_stages))}。"
-                     "profile 数据在 intent.json 的 'profile' 字段中，请使用 stage='intent'。"
-        }, ensure_ascii=False)
+        return json.dumps(
+            {
+                "error": f"无效的 stage '{stage}'，合法值为：{', '.join(sorted(valid_stages))}。"
+                "profile 数据在 intent.json 的 'profile' 字段中，请使用 stage='intent'。"
+            },
+            ensure_ascii=False,
+        )
 
     sid = get_current_session_id()
     if not sid:
-        return json.dumps({
-            "error": "当前会话无阶段产出。这说明前序阶段未正确执行，"
-                     "请停止当前操作并告知用户检查流程。"
-        }, ensure_ascii=False)
+        return json.dumps(
+            {
+                "error": "当前会话无阶段产出。这说明前序阶段未正确执行，"
+                "请停止当前操作并告知用户检查流程。"
+            },
+            ensure_ascii=False,
+        )
 
     path = Path(f"outputs/{sid}/{stage}.json")
     if not path.exists():
-        return json.dumps({
-            "error": f"文件不存在: {path}。前序阶段 '{stage}' 的产出未生成，"
-                     "请停止当前操作并告知用户：上一阶段可能执行失败，需要检查。"
-        }, ensure_ascii=False)
+        return json.dumps(
+            {
+                "error": f"文件不存在: {path}。前序阶段 '{stage}' 的产出未生成，"
+                "请停止当前操作并告知用户：上一阶段可能执行失败，需要检查。"
+            },
+            ensure_ascii=False,
+        )
     return str(path)
 
 
@@ -169,39 +182,38 @@ def get_pipeline_file(stage: str) -> str:
 def analyze_intent(
     intent_goal: dict[str, Any],
 ) -> dict[str, Any]:
-    """执行意图解析与画像补全。
+    """執行意图校验与画像补全。
 
-    根据用户输入的意图字段，加载画像模板，推断补全缺失字段，校验完整性。
+    对传入的意图字段执行结构/枚举/组合一致性/时段完整性校验。
     结果自动写入 outputs/{session_id}/intent.json。
 
     Args:
         intent_goal: 从用户输入中提取的意图字段 dict，例如：
             {
-                "user_type": "直播用户",
-                "scenario": "上行带宽保障",
-                "guarantee_target": {"sensitivity": "卡顿", "priority_level": "high"},
-                "guarantee_period": {"start_time": "20:00", "end_time": "00:00"}
+                "user_type": "主播用户",
+                "package_type": "直播套餐",
+                "scenario": "卖场走播场景",
+                "guarantee_object": "STA级",
+                "guarantee_period": {"start_time": "20:00", "end_time": "00:00"},
+                "complaint_record": {"has_complaint": true}
             }
 
     Returns:
-        {complete, intent_goal, profile, missing_fields, followup, schema}
+        {complete, intent_goal, profile, missing_fields, schema}
         - complete=true 时意图完整，可进入下一阶段
-        - complete=false 时需根据 followup 追问用户
+        - complete=false 时根据 missing_fields 追问用户
     """
     analyze_mod = _load_script_module("intent_profiler/scripts/analyze.py")
 
-    # 1. 加载画像模板，用已知意图字段填充
-    profile = analyze_mod.load_profile_template()
-    profile["user_profile"].update(
-        {k: v for k, v in intent_goal.items() if v}
-    )
-
-    # 2. 将画像推断结果合并回意图
-    intent_goal = analyze_mod.merge_intent_with_profile(intent_goal, profile)
-
-    # 3. 校验意图完整性
+    # 1. 校验意图完整性（纯校验，不推断）
     complete, missing = analyze_mod.validate_intent(intent_goal)
-    followup = analyze_mod.generate_followup_questions(missing) if not complete else ""
+
+    # 2. 将已知意图字段同步到画像模板
+    profile = analyze_mod.load_profile_template()
+    for key, val in intent_goal.items():
+        if val and key in profile["user_profile"]:
+            profile["user_profile"][key] = val
+
     schema = analyze_mod.load_intent_schema()
 
     result: dict[str, Any] = {
@@ -209,7 +221,6 @@ def analyze_intent(
         "intent_goal": intent_goal,
         "profile": profile,
         "missing_fields": missing,
-        "followup": followup,
         "schema": schema,
     }
     _persist_stage("intent", result)
@@ -251,9 +262,7 @@ def generate_plans(
         intent_goal = _read_intent_goal()
 
     if not intent_goal:
-        return {
-            "error": "无法读取 intent_goal，请确保意图解析阶段已完成且 intent.json 存在。"
-        }
+        return {"error": "无法读取 intent_goal，请确保意图解析阶段已完成且 intent.json 存在。"}
 
     generate_mod = _load_script_module("plan_generator/scripts/generate.py")
     # 线程池并行填充 5 个模板（不用 asyncio.run，避免 event loop ���突）
@@ -281,7 +290,8 @@ def generate_plans(
 
 @_guarded
 def check_constraints(
-    plans_file: str, intent_goal: dict[str, Any] | None = None,
+    plans_file: str,
+    intent_goal: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """执行约束校验（直接调用规则引擎）。
 
@@ -317,7 +327,8 @@ def check_constraints(
 
 @_guarded
 def translate_configs(
-    plans_file: str, device_id: str = "",
+    plans_file: str,
+    device_id: str = "",
 ) -> dict[str, Any]:
     """执行配置转译（直接调用字段映射引擎）。
 
