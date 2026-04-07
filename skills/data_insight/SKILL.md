@@ -23,9 +23,24 @@ description: "数据洞察分析，查询网络质量数据并进行归因分析
 2. 分析返回的数据，识别异常点
 3. 进行归因分析（原型阶段基于规则）
 4. 将结果传递给 report_generation 生成报告
+5. 若用户随后要求生成优化方案，将完整输出（含 `config_hints`）传递给 slot_filling
 
 ## Scripts
 - `scripts/mock_query.py` — mock 数据查询脚本
+
+## Output Schema
+
+脚本输出除 `data` / `analysis` / `summary` 外，还包含 `config_hints` 块，供后续 Skill 使用：
+
+| 字段 | 含义 | 下游用途 |
+|------|------|---------|
+| `config_hints.priority_pons` | CEI < 60 的问题 PON 口 | CEI/远程闭环配置目标 |
+| `config_hints.watch_pons` | CEI 60-75 的观察 PON 口 | 持续监控 |
+| `config_hints.distinct_issues` | 所有异常类型汇总（原始中文） | fault_config 检测规则推断 |
+| `config_hints.scope_indicator` | 问题波及范围（single_pon / multi_pon / regional） | 推断 guarantee_target 槽位 |
+| `config_hints.peak_time_window` | 推断的高峰时段（如 "19:00-22:00"，无则 null） | 推断 time_window 槽位 |
+| `config_hints.has_complaints` | 是否存在用户投诉 | 推断 complaint_history 槽位 |
+| `config_hints.remote_loop_candidates` | 建议开启自动闭环的 PON 口 | remote_loop 配置优先级 |
 
 ## Examples
 

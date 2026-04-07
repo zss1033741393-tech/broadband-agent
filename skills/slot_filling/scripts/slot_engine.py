@@ -144,12 +144,94 @@ def process(current_state_json: str = "{}", user_input: str = "") -> str:
     return json.dumps(result, ensure_ascii=False, indent=2)
 
 
+def process_from_insight(insight_json: str = "{}") -> str:
+    """数据洞察模式下的槽位预处理。
+
+    职责（设计边界）：
+    - 从 config_hints 程序化提取可确定字段（time_window、complaint_history）
+    - 将 scope_indicator → guarantee_target 的候选值作为推断线索返回，不强制赋值
+    - 不硬编码 user_type / package_type / scenario 最终值，交由 LLM 推断
+    - next_questions 始终为空（原型阶段直接推断）
+
+    后续交互扩展点：
+    - 若 LLM 推断置信度不足，可在 next_questions 填入 1 条追问
+    - 接入真实 API 后，此函数接口（入参/返回结构）保持不变
+    """
+    import re
+
+    try:
+        insight = json.loads(insight_json) if isinstance(insight_json, str) else insight_json
+    except json.JSONDecodeError:
+        insight = {}
+
+    hints: Dict[str, Any] = insight.get("config_hints", {})
+    extracted: Dict[str, Any] = {}
+
+    # 程序化提取：时间窗口（优先读 config_hints，兜底全文正则）
+    if hints.get("peak_time_window"):
+        extracted["time_window"] = hints["peak_time_window"]
+    else:
+        all_text = json.dumps(insight, ensure_ascii=False)
+        time_match = re.search(r'\d{1,2}:\d{2}\s*[-–]\s*\d{1,2}:\d{2}', all_text)
+        if time_match:
+            extracted["time_window"] = time_match.group().replace('–', '-')
+
+    # 程序化提取：投诉标记
+    if hints.get("has_complaints"):
+        extracted["complaint_history"] = True
+
+    # scope_indicator → guarantee_target 候选映射（供 LLM 参考，不强制）
+    _scope_map = {
+        "single_pon": "家庭网络",
+        "multi_pon":  "整网",
+        "regional":   "整网",
+    }
+    scope = hints.get("scope_indicator", "")
+    guarantee_hint = _scope_map.get(scope, "")
+
+    # 待 LLM 推断的槽位（含推断线索说明）
+    slots_to_infer: Dict[str, str] = {
+        "user_type":    "无法从网络数据直接推断，请根据业务场景判断（主播用户/游戏用户/VVIP用户）",
+        "package_type": "无法从网络数据直接推断，请根据业务场景判断（普通套餐/直播套餐/专线套餐）",
+        "scenario":     f"参考 distinct_issues={hints.get('distinct_issues', [])} 推断适用场景",
+        "guarantee_target": (
+            f"参考 scope_indicator='{scope}' → 候选值='{guarantee_hint}'，可根据实际情况调整"
+        ),
+    }
+    if "time_window" not in extracted:
+        slots_to_infer["time_window"] = "未检测到时段信息，请根据洞察结果判断（如'全天'）"
+
+    result = {
+        "mode": "data_insight",
+        "extracted_slots": extracted,           # 程序化已确定的字段
+        "slots_to_infer": slots_to_infer,       # 需要 LLM 推断的字段（含推断线索）
+        "config_hints": hints,                  # 来自 data_insight 的配置线索（原始）
+        "insight_summary": {                    # 快速摘要，供 LLM 高效阅读
+            "priority_pons":          hints.get("priority_pons", []),
+            "distinct_issues":        hints.get("distinct_issues", []),
+            "remote_loop_candidates": hints.get("remote_loop_candidates", []),
+            "scope_indicator":        scope,
+            "peak_time_window":       hints.get("peak_time_window"),
+        },
+        # [扩展点] 当 inference_confidence 不足时填入追问，当前原型阶段始终为空
+        "next_questions": [],
+    }
+
+    return json.dumps(result, ensure_ascii=False, indent=2)
+
+
 if __name__ == "__main__":
     # 支持命令行调用测试
-    state = "{}"
-    user_input = ""
-    if len(sys.argv) > 1:
-        user_input = sys.argv[1]
-    if len(sys.argv) > 2:
-        state = sys.argv[2]
-    print(process(state, user_input))
+    # 用法1: python slot_engine.py <user_input> [current_state_json]
+    # 用法2: python slot_engine.py --insight <insight_json>
+    if len(sys.argv) > 1 and sys.argv[1] == "--insight":
+        insight_json = sys.argv[2] if len(sys.argv) > 2 else "{}"
+        print(process_from_insight(insight_json))
+    else:
+        state = "{}"
+        user_input = ""
+        if len(sys.argv) > 1:
+            user_input = sys.argv[1]
+        if len(sys.argv) > 2:
+            state = sys.argv[2]
+        print(process(state, user_input))

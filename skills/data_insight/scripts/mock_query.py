@@ -85,6 +85,56 @@ _MOCK_DATA = {
 }
 
 
+def _build_config_hints(data: List[Dict], analysis: List[Dict]) -> Dict:
+    """基于分析结果计算配置生成所需的中间指标。
+
+    [Mock 阶段] 当前基于 mock 数据计算。
+    [扩展点] 接入真实 API 后，替换此函数内部逻辑，对外接口（字段名）保持不变。
+    """
+    priority_pons = [a["pon_port"] for a in analysis if a["cei_score"] < 60]
+    watch_pons    = [a["pon_port"] for a in analysis if 60 <= a["cei_score"] < 75]
+
+    all_issues: List[str] = []
+    for a in analysis:
+        all_issues.extend(a["issues"])
+    distinct_issues = list(dict.fromkeys(all_issues))  # 保序去重
+
+    # 波及范围（供 LLM 推断 guarantee_target）
+    affected_count = len([p for p in data if p["cei_score"] < 75])
+    total = len(data) or 1
+    if affected_count >= total * 0.5:
+        scope_indicator = "regional"    # 大范围 → 整网
+    elif affected_count > 1:
+        scope_indicator = "multi_pon"   # 多 PON 口 → 区域/整网
+    else:
+        scope_indicator = "single_pon"  # 单 PON 口 → 家庭网络
+
+    total_complaints = sum(p.get("complaint_count_7d", 0) for p in data)
+    has_peak_congestion = any(p["peak_hour_util"] > 0.95 for p in data)
+
+    # [Mock 阶段] 高峰时段写死为晚高峰典型值，真实数据应从时序数据推断
+    peak_time_window = "19:00-22:00" if has_peak_congestion else None
+
+    remote_loop_candidates = [
+        a["pon_port"] for a in analysis
+        if a["cei_score"] < 60
+        and next(
+            (p for p in data if p["pon_port"] == a["pon_port"]), {}
+        ).get("complaint_count_7d", 0) > 3
+    ]
+
+    return {
+        "priority_pons": priority_pons,              # CEI < 60，需立即处置
+        "watch_pons": watch_pons,                    # CEI 60-75，持续监控
+        "distinct_issues": distinct_issues,          # 所有异常类型（原始中文，保序去重）
+        "scope_indicator": scope_indicator,          # "single_pon"|"multi_pon"|"regional"
+        "has_complaints": total_complaints > 0,
+        "total_complaints_7d": total_complaints,
+        "peak_time_window": peak_time_window,        # None 表示无明显高峰
+        "remote_loop_candidates": remote_loop_candidates,
+    }
+
+
 def _analyze(data: List[Dict]) -> List[Dict]:
     """简单规则归因分析。"""
     analysis = []
@@ -145,6 +195,7 @@ def query(query_type: str = "all") -> str:
         "data": data,
         "analysis": analysis,
         "summary": _MOCK_DATA["summary"],
+        "config_hints": _build_config_hints(data, analysis),
     }
 
     return json.dumps(result, ensure_ascii=False, indent=2)

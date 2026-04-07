@@ -62,6 +62,40 @@ def render_all(profile_json: str) -> str:
     return json.dumps(results, ensure_ascii=False, indent=2)
 
 
+def render_from_insight(profile_json: str) -> str:
+    """数据洞察模式下的方案渲染。
+
+    接收 Agent 推断后的画像（含 config_hints），渲染标准四类配置，
+    并附加结构化的 optimization_focus 块供 Agent 在最终回答中综合引用。
+    不在此函数中生成文字推荐——文字叙述由 LLM 负责。
+
+    [扩展点] 后续可将 config_hints 字段注入 Jinja2 模板（如在 CEI 模板中
+    直接填充 priority_pons 作为 target_pon），实现精细化渲染。
+    """
+    try:
+        profile = json.loads(profile_json) if isinstance(profile_json, str) else profile_json
+    except json.JSONDecodeError:
+        return json.dumps({"error": "无效的画像 JSON"}, ensure_ascii=False)
+
+    # 渲染标准四类配置（复用现有逻辑）
+    base_result = json.loads(render_all(profile_json))
+
+    # 附加洞察专属结构（结构化数据，不生成推荐文字）
+    hints = profile.get("config_hints", {})
+    base_result["optimization_focus"] = {
+        "trigger":                "data_insight",
+        "priority_pons":          hints.get("priority_pons", []),
+        "watch_pons":             hints.get("watch_pons", []),
+        "distinct_issues":        hints.get("distinct_issues", []),
+        "remote_loop_candidates": hints.get("remote_loop_candidates", []),
+        "peak_time_window":       hints.get("peak_time_window"),
+        "scope_indicator":        hints.get("scope_indicator"),
+        "total_complaints_7d":    hints.get("total_complaints_7d", 0),
+    }
+
+    return json.dumps(base_result, ensure_ascii=False, indent=2)
+
+
 if __name__ == "__main__":
     if len(sys.argv) > 1:
         print(render_all(sys.argv[1]))

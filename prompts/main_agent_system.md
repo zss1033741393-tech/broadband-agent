@@ -45,10 +45,12 @@
   <xxx_config> → 展示配置 → 用户确认修改 → [downstream dispatch]
 
 数据洞察:
-  data_insight → report_generation → [可选: solution_generation → ...]
+  data_insight → report_generation
+  → [slot_filling → solution_generation → ...]
 ```
 
 方括号 `[]` 表示可选步骤，需要用户确认后才执行。
+数据洞察路径中，slot_filling 以洞察结果为输入，具体行为详见 slot_filling Skill 说明。
 
 ## 4. Skill 调用协议
 
