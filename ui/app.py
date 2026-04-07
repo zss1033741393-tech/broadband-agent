@@ -146,7 +146,7 @@ def create_app() -> gr.Blocks:
 
         chatbot = gr.Chatbot(
             height=600,
-            show_copy_button=True,
+            buttons=["copy", "copy_all"],
             placeholder="请输入您的需求，例如：\n- 直播套餐卖场走播用户，18:00-22:00 保障抖音直播\n- 生成 CEI 配置\n- 找出 CEI 分数较低的 PON 口并分析原因",
         )
 
