@@ -28,8 +28,11 @@ def create_model(config: Dict[str, Any] = None):
         config = load_model_config()
 
     provider = config.get("provider", "openai")
-    api_key_env = config.get("api_key_env", "OPENAI_API_KEY")
-    api_key = os.environ.get(api_key_env, "")
+    # 优先使用 yaml 中直接配置的 api_key，其次从环境变量读取
+    api_key = config.get("api_key", "") or ""
+    if not api_key:
+        api_key_env = config.get("api_key_env", "OPENAI_API_KEY")
+        api_key = os.environ.get(api_key_env, "")
 
     common_params = {
         "id": config.get("model", "gpt-4o-mini"),
