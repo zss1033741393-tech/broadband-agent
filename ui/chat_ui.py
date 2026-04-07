@@ -730,5 +730,9 @@ def create_ui() -> gr.ChatInterface:
 
 
 if __name__ == "__main__":
+    import os
+
+    os.environ.setdefault("NO_PROXY", "localhost,127.0.0.1")
+    os.environ.setdefault("no_proxy", "localhost,127.0.0.1")
     ui = create_ui()
     ui.launch(server_name="0.0.0.0", server_port=7860, share=False)
