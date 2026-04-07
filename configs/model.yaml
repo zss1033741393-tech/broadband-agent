@@ -1,0 +1,7 @@
+provider: openai         # openai | openrouter
+base_url: https://api.openai.com/v1
+api_key_env: OPENAI_API_KEY
+model: gpt-4o-mini
+temperature: 0.3
+max_tokens: 4096
+timeout: 60

@@ -1,0 +1,43 @@
+wifi_simulation:
+  profile:
+    user_type: "{{ user_type }}"
+    package_type: "{{ package_type }}"
+    scenario: "{{ scenario }}"
+
+  scenario_config:
+    name: "{{ scenario }}场景仿真"
+    {% if scenario == "卖场走播" %}
+    layout: "开放式卖场"
+    area_sqm: 200
+    wall_count: 2
+    wall_material: "glass"
+    {% elif scenario == "楼宇直播" %}
+    layout: "楼宇办公区"
+    area_sqm: 150
+    wall_count: 6
+    wall_material: "concrete"
+    {% else %}
+    layout: "家庭户型"
+    area_sqm: 100
+    wall_count: 5
+    wall_material: "brick"
+    {% endif %}
+
+  access_points:
+    - id: "AP-PRIMARY"
+      band: "dual"
+      standard: "wifi6"
+      tx_power_dbm: {% if scenario == "卖场走播" %}23{% else %}20{% endif %}
+
+  simulation:
+    time_window: "{{ time_window }}"
+    traffic_model: "{% if scenario in ['卖场走播', '楼宇直播'] %}video{% else %}mixed{% endif %}"
+    {% if scenario in ["卖场走播", "楼宇直播"] %}
+    upload_priority: true
+    streaming_bitrate_mbps: 8
+    {% endif %}
+
+  evaluation:
+    coverage_threshold_dbm: -65
+    throughput_target_mbps: {% if package_type == "专线套餐" %}100{% elif package_type == "直播套餐" %}50{% else %}30{% endif %}
+    latency_target_ms: {% if scenario in ["卖场走播", "楼宇直播"] %}15{% else %}20{% endif %}

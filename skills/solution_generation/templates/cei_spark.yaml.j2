@@ -1,0 +1,32 @@
+cei_spark:
+  # 自动生成 — 基于用户画像
+  profile:
+    user_type: "{{ user_type }}"
+    package_type: "{{ package_type }}"
+    scenario: "{{ scenario }}"
+
+  target_scope: "{{ guarantee_target }}"
+  time_window: "{{ time_window }}"
+
+  collection_interval: {% if scenario == "卖场走播" %}60{% else %}300{% endif %}
+
+  metrics:
+    - bandwidth_utilization
+    - packet_loss_rate
+    - latency_avg
+    - jitter
+    {% if scenario in ["卖场走播", "楼宇直播"] %}- streaming_quality
+    - upload_bandwidth{% endif %}
+
+  threshold:
+    cei_score_warning: {% if package_type == "专线套餐" %}80{% elif package_type == "直播套餐" %}75{% else %}70{% endif %}
+
+    cei_score_critical: {% if package_type == "专线套餐" %}60{% elif package_type == "直播套餐" %}55{% else %}50{% endif %}
+
+    bandwidth_util_max: {% if scenario == "卖场走播" %}0.75{% else %}0.90{% endif %}
+
+    packet_loss_max: {% if package_type == "专线套餐" %}0.005{% else %}0.02{% endif %}
+
+    latency_max_ms: {% if scenario in ["卖场走播", "楼宇直播"] %}30{% else %}50{% endif %}
+
+  priority: {% if package_type == "专线套餐" %}critical{% elif package_type == "直播套餐" %}high{% else %}normal{% endif %}
