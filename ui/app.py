@@ -152,11 +152,41 @@ async def chat_handler(
         yield history
 
 
+_EXAMPLE_MESSAGES = [
+    "直播套餐卖场走播用户，18:00-22:00 保障抖音直播",
+    "生成 CEI 配置",
+    "生成 Wifi 仿真配置",
+    "生成故障检测配置",
+    "生成远程闭环配置",
+    "找出 CEI 分数较低的 PON 口并分析原因",
+]
+
+_CSS = """
+/* 统一正文字体，避免 CEI 等大写字母被渲染成衬线/花体 */
+.gradio-container, .gradio-container * {
+    font-family: "PingFang SC", "Microsoft YaHei", "Noto Sans SC",
+                 "Helvetica Neue", Arial, sans-serif !important;
+}
+/* 示例消息按钮样式 */
+.example-btn {
+    font-size: 0.85em !important;
+    padding: 4px 10px !important;
+    border-radius: 14px !important;
+    border: 1px solid #d0d7de !important;
+    background: #f6f8fa !important;
+    color: #24292f !important;
+    cursor: pointer;
+    white-space: nowrap;
+}
+.example-btn:hover {
+    background: #e9ecef !important;
+    border-color: #b0b7c0 !important;
+}
+"""
+
 def create_app() -> gr.Blocks:
     """创建 Gradio 应用。"""
-    with gr.Blocks(
-        title="家宽网络调优助手",
-    ) as app:
+    with gr.Blocks(title="家宽网络调优助手", css=_CSS) as app:
         gr.Markdown("# 🏠 家宽网络调优智能助手")
         gr.Markdown("支持：综合目标设定 | 具体功能配置 | 数据洞察分析")
 
@@ -165,14 +195,21 @@ def create_app() -> gr.Blocks:
         pending_msg = gr.State("")
 
         chatbot = gr.Chatbot(
-            height=600,
+            height=550,
             buttons=["copy", "copy_all"],
-            placeholder="请输入您的需求，例如：\n- 直播套餐卖场走播用户，18:00-22:00 保障抖音直播\n- 生成 CEI 配置\n- 找出 CEI 分数较低的 PON 口并分析原因",
         )
+
+        # 示例消息快捷按钮（点击直接填入输入框）
+        gr.Markdown("**示例消息（点击填入）：**")
+        with gr.Row(elem_classes=["example-row"]):
+            example_btns = [
+                gr.Button(msg, elem_classes=["example-btn"], size="sm")
+                for msg in _EXAMPLE_MESSAGES
+            ]
 
         with gr.Row():
             msg_input = gr.Textbox(
-                placeholder="输入消息...",
+                placeholder="输入消息，或点击上方示例...",
                 show_label=False,
                 scale=9,
                 container=False,
@@ -194,6 +231,26 @@ def create_app() -> gr.Blocks:
         def _re_enable():
             """流式完成后重新启用发送按钮。"""
             return gr.update(interactive=True)
+
+        def _chain(btn):
+            """为按钮绑定三步链式事件：捕获 → 流式 → 恢复。"""
+            btn.click(
+                fn=_capture_msg,
+                inputs=[btn],
+                outputs=[pending_msg, msg_input, send_btn],
+                queue=False,
+            ).then(
+                fn=chat_handler,
+                inputs=[pending_msg, chatbot, session_state],
+                outputs=[chatbot],
+            ).then(
+                fn=_re_enable,
+                outputs=[send_btn],
+            )
+
+        # 示例按钮点击 → 直接触发发送（无需中转到输入框）
+        for btn in example_btns:
+            _chain(btn)
 
         # 发送按钮：捕获消息 → 流式响应 → 恢复按钮
         send_btn.click(
