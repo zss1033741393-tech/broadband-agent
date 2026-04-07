@@ -3,29 +3,99 @@
     "user_type": {
       "type": "string",
       "description": "用户类型",
-      "examples": ["直播用户", "游戏用户", "办公用户", "视频用户"]
+      "enum": ["主播用户", "游戏用户", "VVIP用户"]
+    },
+    "package_type": {
+      "type": "string",
+      "description": "套餐类型",
+      "enum": ["普通套餐", "直播套餐", "专线套餐"]
     },
     "scenario": {
       "type": "string",
-      "description": "保障场景",
-      "examples": ["上行带宽保障", "低延迟保障", "稳定性保障"]
+      "description": "业务场景（由用户类型+套餐类型共同决定）",
+      "enum": ["家庭直播用户", "卖场走播场景", "楼宇直播"]
     },
-    "guarantee_period": {
-      "start_time": { "type": "string", "format": "HH:MM" },
-      "end_time": { "type": "string", "format": "HH:MM" },
-      "is_periodic": { "type": "boolean", "default": false }
+    "scenario_issues": {
+      "type": "array",
+      "description": "该场景的典型网络问题",
+      "items": "string",
+      "examples": ["覆盖弱", "强干扰", "漫游问题", "PON拥塞", "云服务分发问题"]
+    },
+    "guarantee_object": {
+      "type": "string",
+      "description": "保障对象粒度",
+      "enum": ["家庭网络", "STA级", "整网"]
     },
     "guarantee_target": {
-      "priority_level": { "type": "string", "enum": ["high", "medium", "low"] },
-      "sensitivity": { "type": "string", "description": "用户敏感点，如卡顿/延迟/断线" },
-      "key_applications": { "type": "array", "items": "string", "examples": ["OBS", "抖音直播", "钉钉"] }
+      "type": "object",
+      "description": "保障目标详情",
+      "properties": {
+        "priority_level": {
+          "type": "string",
+          "enum": ["high", "medium", "low"],
+          "description": "优先级：high=高优先/有投诉, medium=默认, low=一般保障"
+        },
+        "sensitivity": {
+          "type": "string",
+          "description": "用户最敏感的问题类型",
+          "examples": ["卡顿", "延迟", "断线"]
+        },
+        "key_applications": {
+          "type": "array",
+          "items": "string",
+          "description": "需要重点保障的应用或平台",
+          "examples": ["抖音直播", "快手直播", "虎牙直播", "王者荣耀", "英雄联盟"]
+        },
+        "sta_device": {
+          "type": "string",
+          "description": "当 guarantee_object=STA级 时，指定保障的终端设备或平台标识"
+        }
+      }
+    },
+    "guarantee_period": {
+      "type": "object",
+      "description": "保障时段",
+      "properties": {
+        "start_time": { "type": "string", "format": "HH:MM", "description": "开始时间，如 18:00" },
+        "end_time": { "type": "string", "format": "HH:MM", "description": "结束时间，如 22:00" },
+        "is_all_day": { "type": "boolean", "default": false, "description": "是否全天保障，true 时 start_time/end_time 设为 00:00/23:59" }
+      }
+    },
+    "complaint_record": {
+      "type": "object",
+      "description": "投诉记录",
+      "properties": {
+        "has_complaint": { "type": "boolean", "description": "是否有过投诉" },
+        "complaint_type": {
+          "type": "string",
+          "description": "投诉内容类型",
+          "examples": ["卡顿", "断线", "延迟高", "覆盖差"]
+        }
+      }
     },
     "core_metrics": {
-      "latency_sensitive": { "type": "boolean", "default": false },
-      "bandwidth_priority": { "type": "boolean", "default": false },
-      "stability_priority": { "type": "boolean", "default": false }
-    },
-    "resolution_requirement": { "type": "string", "examples": ["1080p", "4K", "720p"] }
+      "type": "object",
+      "description": "核心指标偏好（可从上下文推断）",
+      "properties": {
+        "latency_sensitive": { "type": "boolean", "default": false },
+        "bandwidth_priority": { "type": "boolean", "default": false },
+        "stability_priority": { "type": "boolean", "default": false }
+      }
+    }
   },
-  "required_fields": ["user_type", "scenario", "guarantee_target"]
+  "required_fields": ["user_type", "package_type", "scenario", "guarantee_object", "guarantee_period"],
+  "valid_combinations": {
+    "普通套餐": {
+      "scenarios": ["家庭直播用户"],
+      "guarantee_objects": ["家庭网络", "STA级"]
+    },
+    "直播套餐": {
+      "scenarios": ["卖场走播场景", "楼宇直播"],
+      "guarantee_objects": ["STA级", "整网"]
+    },
+    "专线套餐": {
+      "scenarios": ["卖场走播场景", "楼宇直播"],
+      "guarantee_objects": ["STA级", "整网"]
+    }
+  }
 }

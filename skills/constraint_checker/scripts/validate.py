@@ -1,4 +1,5 @@
-#!/usr/bin/env python3
+from __future__ import annotations
+
 """约束校验脚本 — 性能/组网/冲突三类校验"""
 import json
 from pathlib import Path
@@ -19,7 +20,6 @@ def check_performance_constraints(plans: dict[str, Any]) -> list[dict[str, Any]]
     Returns:
         失败的校验项列表，每项包含 id/message/severity
     """
-    rules_data = _load_rules("performance_rules.json")
     failures: list[dict[str, Any]] = []
 
     cei = plans.get("cei_perception.json", {}).get("filled_data", {}).get("cei_perception", {})
@@ -67,10 +67,14 @@ def check_conflict_constraints(
 
     # CONF_001: 节能时段与保障时段冲突
     guarantee_period = intent_goal.get("guarantee_period", {})
-    g_start = guarantee_period.get("start_time", "00:00")
-    g_end = guarantee_period.get("end_time", "23:59")
+    is_all_day = guarantee_period.get("is_all_day", False)
+    g_start = guarantee_period.get("start_time", "00:00") or "00:00"
+    g_end = guarantee_period.get("end_time", "23:59") or "23:59"
+    # 兼容旧版全天判断
+    if g_start == "00:00" and g_end == "23:59":
+        is_all_day = True
     energy_trigger = energy.get("trigger_time", "02:00")
-    if energy.get("enabled") and _time_in_range(energy_trigger, g_start, g_end):
+    if energy.get("enabled") and not is_all_day and _time_in_range(energy_trigger, g_start, g_end):
         conflicts.append({
             "id": "CONF_001",
             "message": f"节能触发时间 {energy_trigger} 与保障时段 {g_start}-{g_end} 重叠",
@@ -85,6 +89,18 @@ def check_conflict_constraints(
             "message": "WiFi 漫游优化与覆盖优化不能同时开启",
             "severity": "error",
             "suggestion": "关闭 coverage_optimization，保留 roaming_optimization",
+        })
+
+    # CONF_003: STA 级保障要求 per_user_enabled=true
+    guarantee_obj = intent_goal.get("guarantee_object", "")
+    cei = plans.get("cei_perception.json", {}).get("filled_data", {}).get("cei_perception", {})
+    per_user = cei.get("perception_granularity", {}).get("per_user_enabled", False)
+    if guarantee_obj == "STA级" and not per_user:
+        conflicts.append({
+            "id": "CONF_003",
+            "message": "保障对象为 STA 级时，CEI 感知必须开启 per_user 模式",
+            "severity": "warning",
+            "suggestion": "将 cei_perception.perception_granularity.per_user_enabled 设为 true",
         })
 
     return conflicts

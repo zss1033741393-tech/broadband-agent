@@ -1,16 +1,24 @@
 {
   "user_profile": {
     "user_type": "",
+    "package_type": "",
     "scenario": "",
-    "guarantee_period": {
-      "start_time": "",
-      "end_time": "",
-      "is_periodic": false
-    },
+    "scenario_issues": [],
+    "guarantee_object": "",
     "guarantee_target": {
       "priority_level": "",
       "sensitivity": "",
-      "key_applications": []
+      "key_applications": [],
+      "sta_device": ""
+    },
+    "guarantee_period": {
+      "start_time": "",
+      "end_time": "",
+      "is_all_day": false
+    },
+    "complaint_record": {
+      "has_complaint": false,
+      "complaint_type": ""
     },
     "core_metrics": {
       "latency_sensitive": false,

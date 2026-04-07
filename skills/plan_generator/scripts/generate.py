@@ -1,5 +1,7 @@
-#!/usr/bin/env python3
+from __future__ import annotations
+
 """方案模板填充脚本"""
+
 import asyncio
 import json
 from pathlib import Path
@@ -36,7 +38,7 @@ def load_filling_rules() -> str:
 def _deep_get(d: dict[str, Any], path: str) -> Any:
     """按点号路径获取嵌套字典值"""
     keys = path.split(".")
-    cur = d
+    cur: Any = d
     for k in keys:
         if isinstance(cur, dict):
             cur = cur.get(k)
@@ -48,7 +50,7 @@ def _deep_get(d: dict[str, Any], path: str) -> Any:
 def _deep_set(d: dict[str, Any], path: str, value: Any) -> bool:
     """按点号路径设置嵌套字典值，返回是否成功"""
     keys = path.split(".")
-    cur = d
+    cur: Any = d
     for k in keys[:-1]:
         if k not in cur:
             return False
@@ -63,8 +65,7 @@ def fill_template(
     template: dict[str, Any],
     params: dict[str, Any],
 ) -> tuple[dict[str, Any], list[str]]:
-    """
-    填充模板参数。
+    """填充模板参数。
 
     Args:
         template: 原始模板
@@ -93,57 +94,97 @@ def build_params_from_intent(
     intent_goal: dict[str, Any],
     template_name: str,
 ) -> dict[str, Any]:
-    """
-    根据意图目标和模板名称，构建需要覆盖的参数。
-    此函数实现 filling_rules.md 中的规则逻辑。
+    """根据意图目标和模板名称，构建需要覆盖的参数。
+
+    支持新版领域化字段（package_type / scenario / guarantee_object / complaint_record）
+    以及旧版 user_type 语义推断（向后兼容）。
     """
     params: dict[str, Any] = {}
+
+    # ── 字段提取 ─────────────────────────────────────────────────────────────
     user_type = intent_goal.get("user_type", "")
+    package_type = intent_goal.get("package_type", "")
+    scenario = intent_goal.get("scenario", "")
+    guarantee_obj = intent_goal.get("guarantee_object", "")
     sensitivity = intent_goal.get("guarantee_target", {}).get("sensitivity", "")
     priority = intent_goal.get("guarantee_target", {}).get("priority_level", "medium")
+    has_complaint = intent_goal.get("complaint_record", {}).get("has_complaint", False)
+
     period = intent_goal.get("guarantee_period", {})
-    start_time = period.get("start_time", "00:00")
-    end_time = period.get("end_time", "23:59")
-    all_day = (start_time == "00:00" and end_time == "23:59")
+    is_all_day = period.get("is_all_day", False)
+    start_time = period.get("start_time", "00:00") or "00:00"
+    end_time = period.get("end_time", "23:59") or "23:59"
+    # 兼容旧版全天判断
+    if start_time == "00:00" and end_time == "23:59":
+        is_all_day = True
+
+    # 语义推断：新旧 user_type 枚举兼容
+    is_streamer = "主播" in user_type or "直播" in user_type
+    is_gamer = "游戏" in user_type
+    is_vvip = "VVIP" in user_type or "vvip" in user_type.lower()
 
     if template_name == "cei_perception.json":
-        # 保障时段
-        if not all_day:
+        # ── 保障时段 ────────────────────────────────────────────────────────
+        if not is_all_day:
             params["cei_perception.trigger_window.start_time"] = start_time
             params["cei_perception.trigger_window.end_time"] = end_time
             params["cei_perception.trigger_window.all_day"] = False
-        # 用户类型特化
-        if "直播" in user_type or "卡顿" in sensitivity:
-            params["cei_perception.warning_threshold.latency_ms"] = 50
+
+        # ── 场景特化：卖场走播 ───────────────────────────────────────────────
+        if scenario == "卖场走播场景":
             params["cei_perception.perception_granularity.per_user_enabled"] = True
-            params["cei_perception.perception_granularity.sampling_interval_sec"] = 60
-        if "游戏" in user_type or "延迟" in sensitivity:
+            params["cei_perception.perception_granularity.sampling_interval_sec"] = 30
+
+        # ── 场景特化：楼宇直播（PON 拥塞关注带宽利用率）─────────────────────
+        if scenario == "楼宇直播":
+            params["cei_perception.warning_threshold.bandwidth_util_rate"] = 0.7
+
+        # ── 保障对象：STA 级必须开启 per_user ────────────────────────────────
+        if guarantee_obj == "STA级":
+            params["cei_perception.perception_granularity.per_user_enabled"] = True
+
+        # ── 投诉记录：加密采集粒度 ───────────────────────────────────────────
+        if has_complaint:
+            params["cei_perception.perception_granularity.sampling_interval_sec"] = 30
+
+        # ── 用户类型特化（兼容旧版枚举）─────────────────────────────────────
+        if is_streamer or "卡顿" in sensitivity:
+            params.setdefault("cei_perception.warning_threshold.latency_ms", 50)
+            params.setdefault("cei_perception.perception_granularity.per_user_enabled", True)
+            params.setdefault("cei_perception.perception_granularity.sampling_interval_sec", 60)
+        if is_gamer or "延迟" in sensitivity:
             params["cei_perception.warning_threshold.latency_ms"] = 30
             params["cei_perception.warning_threshold.jitter_ms"] = 10
-        if "稳定" in sensitivity:
+        if "稳定" in sensitivity or "断线" in sensitivity:
             params["cei_perception.warning_threshold.packet_loss_rate"] = 0.001
 
     elif template_name == "remote_closure.json":
-        if "直播" in user_type:
+        if is_streamer or is_vvip:
             params["remote_closure.closure_strategy.auto_execute"] = True
-        if priority == "high":
+        if priority == "high" or is_vvip:
             params["remote_closure.closure_strategy.require_approval"] = False
 
     elif template_name == "dynamic_optimization.json":
-        if "直播" in user_type or "游戏" in user_type:
+        # ── 实时优化 ─────────────────────────────────────────────────────────
+        if is_streamer or is_gamer or is_vvip:
             params["dynamic_optimization.realtime_optimization.enabled"] = True
             params["dynamic_optimization.realtime_optimization.qos_auto_adjust"] = True
-        if "游戏" in user_type:
+        if is_gamer:
             params["dynamic_optimization.realtime_optimization.congestion_control"] = True
-        if "办公" in user_type:
-            params["dynamic_optimization.habit_pre_optimization.enabled"] = True
 
-        # ── 节能时段避让保障时段（预防 CONF_001）──────────────
-        if not all_day and _time_in_range("02:00", start_time, end_time):
-            # 默认节能触发 02:00 落在保障时段内，需要移出
+        # ── 场景特化：卖场走播 → WiFi 漫游优化 ───────────────────────────────
+        if scenario == "卖场走播场景":
+            params["dynamic_optimization.wifi_optimization.roaming_optimization"] = True
+
+        # ── 套餐特化：专线套餐 → 上行带宽高度预留 ───────────────────────────
+        if package_type == "专线套餐":
+            params["dynamic_optimization.realtime_optimization.enabled"] = True
+            params["dynamic_optimization.realtime_optimization.qos_auto_adjust"] = True
+
+        # ── 节能时段避让保障时段（预防 CONF_001）────────────────────────────
+        if not is_all_day and _time_in_range("02:00", start_time, end_time):
             end_h = int(end_time.split(":")[0])
             safe_trigger_h = (end_h + 1) % 24
-            # 只有落在合理夜间时段（22:00-07:00）才移动，否则禁用节能
             if safe_trigger_h >= 22 or safe_trigger_h <= 5:
                 safe_resume_h = (safe_trigger_h + 4) % 24
                 params["dynamic_optimization.energy_saving.trigger_time"] = f"{safe_trigger_h:02d}:00"
@@ -152,7 +193,7 @@ def build_params_from_intent(
                 params["dynamic_optimization.energy_saving.enabled"] = False
 
     elif template_name == "manual_fallback.json":
-        if priority == "high":
+        if priority == "high" or is_vvip or has_complaint:
             params["manual_fallback.trigger_conditions.high_priority_user"] = True
             params["manual_fallback.dispatch_policy.priority_level"] = "high"
             params["manual_fallback.dispatch_policy.expected_response_minutes"] = 15
@@ -180,8 +221,7 @@ async def fill_single_template(
 async def fill_all_templates(
     intent_goal: dict[str, Any],
 ) -> list[dict[str, Any]]:
-    """
-    并行填充所有 5 个方案模板。
+    """并行填充所有 5 个方案模板。
 
     Returns:
         填充结果列表，每项包含 plan_name / filled_data / changes / status

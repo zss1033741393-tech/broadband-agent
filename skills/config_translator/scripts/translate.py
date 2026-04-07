@@ -1,4 +1,5 @@
-#!/usr/bin/env python3
+from __future__ import annotations
+
 """NL2JSON 配置转译脚本 — 将语义方案转为设备配置格式"""
 import json
 from pathlib import Path
