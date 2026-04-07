@@ -45,6 +45,7 @@ class AgentsConfig(BaseModel):
 
 class PipelineConfig(BaseModel):
     max_turns: int = 15
+    max_iterations: int = 20  # coordinate 模式最大迭代次数
     max_retry_on_constraint_fail: int = 3
     num_history_runs: int = 4  # 主控 OrchestratorTeam 的历史轮数
     skills_dir: str = "./skills"

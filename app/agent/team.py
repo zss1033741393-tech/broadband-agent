@@ -127,6 +127,7 @@ def build_team() -> Team:
         instructions=ORCHESTRATOR_PROMPT,
         add_history_to_context=True,
         num_history_runs=cfg.pipeline.num_history_runs,
+        max_iterations=cfg.pipeline.max_iterations,
         share_member_interactions=True,
         stream_member_events=True,
         tool_hooks=[output_sink_hook],

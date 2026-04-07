@@ -1,5 +1,6 @@
 pipeline:
   max_turns: 15
+  max_iterations: 20            # coordinate 模式最大迭代次数（委派次数上限）
   max_retry_on_constraint_fail: 3
   num_history_runs: 4           # 主控 OrchestratorTeam 的历史轮数
   skills_dir: "./skills"
