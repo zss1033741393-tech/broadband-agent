@@ -70,7 +70,7 @@ async def chat_handler(
         async for event in response_stream:
             event_type = getattr(event, "event", "")
 
-            # 思考/推理内容
+            # 思考/推理内容 (agno 内置推理引擎)
             if event_type == RunEvent.reasoning_content_delta.value:
                 reasoning_buffer += getattr(event, "reasoning_content", "")
                 thinking_msg = render_thinking(reasoning_buffer)
@@ -85,6 +85,11 @@ async def chat_handler(
 
             # 工具调用开始
             elif event_type == RunEvent.tool_call_started.value:
+                # 如果有待提交的思考内容，先提交到历史
+                if reasoning_buffer:
+                    ctx.tracer.thinking(reasoning_buffer)
+                    history = history + [render_thinking(reasoning_buffer)]
+                    reasoning_buffer = ""
                 tool = getattr(event, "tool", None)
                 if tool:
                     tool_name = getattr(tool, "tool_name", "") or getattr(tool, "function_name", "unknown")
@@ -105,11 +110,24 @@ async def chat_handler(
                     history = history + [tool_msg]
                     current_tool = None
 
-            # 内容流
+            # 内容流（同时携带 reasoning_content 和 content）
             elif event_type == RunEvent.run_content.value:
-                delta = getattr(event, "content", "") or ""
-                if delta:
-                    full_content += str(delta)
+                # 处理原生思考内容（Qwen/DeepSeek 等本地思考模型）
+                reasoning_delta = getattr(event, "reasoning_content", None)
+                if reasoning_delta:
+                    reasoning_buffer += reasoning_delta
+                    thinking_msg = render_thinking(reasoning_buffer)
+                    yield history + [thinking_msg]
+
+                # 当正式内容开始时，将思考内容固化到历史
+                content_delta = getattr(event, "content", None)
+                if content_delta is not None and reasoning_buffer:
+                    ctx.tracer.thinking(reasoning_buffer)
+                    history = history + [render_thinking(reasoning_buffer)]
+                    reasoning_buffer = ""
+
+                if content_delta:
+                    full_content += str(content_delta)
                     yield history + [render_response(full_content)]
 
             # 运行完成

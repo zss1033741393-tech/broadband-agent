@@ -58,6 +58,15 @@
 | **可以直接回答** | 解释概念、澄清问题、确认用户意图时 |
 | **禁止** | 凭空编造配置参数——所有配置必须通过 Skill 的模板生成 |
 
+### 脚本调用规则（重要）
+
+调用 `get_skill_script` 前，**必须**先调用 `get_skill_instructions` 获取该 Skill 的可用脚本列表。  
+**禁止猜测或自行命名脚本文件名**，只能使用 `available_scripts` 中列出的文件名。
+
+正确顺序：
+1. `get_skill_instructions(skill_name)` → 查看 `available_scripts`
+2. `get_skill_script(skill_name, script_path=<available_scripts 中的文件名>)`
+
 ## 5. 追问规则（Slot Filling）
 
 进入综合目标流程后：
