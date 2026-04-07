@@ -20,12 +20,10 @@ from pathlib import Path
 from agno.skills import LocalSkills, Skills
 
 from .team import (
+    ORCHESTRATOR_PROMPT,
     build_team,
     get_team,
-    _build_model,
-    ORCHESTRATOR_PROMPT,
 )
-from .tools import SKILLS_DIR
 
 logger = logging.getLogger("agent")
 

@@ -4,7 +4,8 @@ from __future__ import annotations
 from agno.agent import Agent
 
 from app.outputs.sink import output_sink_hook
-from .tools import get_pipeline_file, generate_plans, discover_extra_skills
+
+from .tools import discover_extra_skills, generate_plans, get_pipeline_file
 
 PLAN_PROMPT = """\
 你是方案生成专家。处理流程：

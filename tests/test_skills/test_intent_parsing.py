@@ -2,18 +2,16 @@
 import sys
 from pathlib import Path
 
-import pytest
-
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from skills.intent_profiler.scripts.analyze import (
+    check_profile_missing,
     generate_followup_questions,
+    infer_from_app_history,
     load_intent_schema,
     load_profile_template,
     merge_intent_with_profile,
     validate_intent,
-    check_profile_missing,
-    infer_from_app_history,
 )
 
 

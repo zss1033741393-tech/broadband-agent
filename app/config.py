@@ -3,7 +3,6 @@ from __future__ import annotations
 
 from functools import lru_cache
 from pathlib import Path
-from typing import Optional
 
 import yaml
 from pydantic import BaseModel
@@ -13,7 +12,7 @@ CONFIG_DIR = Path(__file__).parent.parent / "configs"
 
 class LLMConfig(BaseModel):
     api_key: str
-    base_url: Optional[str] = None
+    base_url: str | None = None
     model: str = "gpt-4o"
     temperature: float = 0.7
     max_tokens: int = 4096
@@ -33,7 +32,7 @@ class StorageConfig(BaseModel):
 class AgentConfig(BaseModel):
     """单个子 Agent 的运行参数"""
     num_history_runs: int
-    model: Optional[str] = None  # None = 继承主控 llm.yaml 中的模型
+    model: str | None = None  # None = 继承主控 llm.yaml 中的模型
 
 
 class AgentsConfig(BaseModel):

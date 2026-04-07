@@ -25,13 +25,14 @@ import json
 import logging
 import time
 import uuid
-from typing import Any, AsyncIterator
+from collections.abc import AsyncIterator
+from typing import Any
 
 import gradio as gr
-from gradio.components.chatbot import ChatMessage
-
 from agno.run.agent import RunEvent
 from agno.run.team import TeamRunEvent
+from gradio.components.chatbot import ChatMessage
+
 from app.agent.agent import get_agent
 from app.logger.setup import setup_logging
 from app.outputs.sink import set_current_session_id

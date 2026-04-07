@@ -4,7 +4,8 @@ from __future__ import annotations
 from agno.agent import Agent
 
 from app.outputs.sink import output_sink_hook
-from .tools import get_pipeline_file, translate_configs, discover_extra_skills
+
+from .tools import discover_extra_skills, get_pipeline_file, translate_configs
 
 CONFIG_PROMPT = """\
 你是配置转译专家。处理流程：

@@ -8,9 +8,9 @@
 from __future__ import annotations
 
 import sys
+from collections.abc import AsyncIterator
 from pathlib import Path
 from types import SimpleNamespace
-from typing import AsyncIterator
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -18,7 +18,6 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from agno.run.agent import RunEvent
-
 
 # ─────────────────────────────────────────────────────────────
 # 工具函数：构造 mock RunOutputEvent
@@ -63,13 +62,14 @@ class TestAgentInit:
     def test_discover_skills_returns_skills_object(self) -> None:
         """discover_skills 应返回 Agno Skills 实例"""
         from agno.skills import Skills
-        from app.agent.agent import discover_skills, SKILLS_DIR
+
+        from app.agent.agent import SKILLS_DIR, discover_skills
         skills = discover_skills(SKILLS_DIR)
         assert isinstance(skills, Skills)
 
     def test_discover_skills_finds_all_skill_dirs(self) -> None:
         """discover_skills 应发现所有含 SKILL.md 的子目录"""
-        from app.agent.agent import discover_skills, SKILLS_DIR
+        from app.agent.agent import SKILLS_DIR, discover_skills
         skills = discover_skills(SKILLS_DIR)
         names = skills.get_skill_names()
         for expected in ["intent_profiler", "plan_generator",
@@ -78,7 +78,7 @@ class TestAgentInit:
 
     def test_skills_provide_meta_tools(self) -> None:
         """Skills 应自动注入元工具 get_skill_instructions / get_skill_script"""
-        from app.agent.agent import discover_skills, SKILLS_DIR
+        from app.agent.agent import SKILLS_DIR, discover_skills
         skills = discover_skills(SKILLS_DIR)
         tool_names = {t.name for t in skills.get_tools()}
         assert "get_skill_instructions" in tool_names
@@ -93,8 +93,9 @@ class TestAgentInit:
 
     def test_agent_uses_openai_chat(self) -> None:
         """LLM 模型应使用 OpenAIChat（openai provider），不用 OpenAILike 作为模型类"""
-        import app.agent.agent as agent_module
         import inspect
+
+        import app.agent.agent as agent_module
         src = inspect.getsource(agent_module._build_model)
         assert "OpenAIChat" in src, "openai provider 应使用 OpenAIChat"
         assert "OpenAILike" not in src, "模型层不应使用 OpenAILike（嵌入器层另行处理）"

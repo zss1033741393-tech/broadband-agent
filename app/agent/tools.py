@@ -56,7 +56,7 @@ def _guarded(fn):
                 asyncio.to_thread(fn, *args, **kwargs),
                 timeout=_TOOL_TIMEOUT,
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             logger.error("工具 %s 执行超时 (>%ds)", fn.__name__, _TOOL_TIMEOUT)
             return {
                 "error": f"工具 {fn.__name__} 执行超时（>{_TOOL_TIMEOUT}s）。"
@@ -257,7 +257,6 @@ def generate_plans(
 
     generate_mod = _load_script_module("plan_generator/scripts/generate.py")
     # 线程池并行填充 5 个模板（不用 asyncio.run，避免 event loop ���突）
-    from concurrent.futures import ThreadPoolExecutor
 
     def _fill_one(tpl_name: str) -> dict[str, Any]:
         template = generate_mod.load_template(tpl_name)

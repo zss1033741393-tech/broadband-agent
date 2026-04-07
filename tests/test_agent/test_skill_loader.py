@@ -13,8 +13,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-import pytest
-
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 SKILLS_DIR = Path(__file__).parent.parent.parent / "skills"
@@ -24,11 +22,12 @@ class TestDiscoverSkills:
 
     def test_discover_skills_returns_skills_object(self) -> None:
         from agno.skills import Skills
-        from app.agent.agent import discover_skills, SKILLS_DIR
+
+        from app.agent.agent import SKILLS_DIR, discover_skills
         assert isinstance(discover_skills(SKILLS_DIR), Skills)
 
     def test_discovers_all_six_skills(self) -> None:
-        from app.agent.agent import discover_skills, SKILLS_DIR
+        from app.agent.agent import SKILLS_DIR, discover_skills
         skills = discover_skills(SKILLS_DIR)
         names = skills.get_skill_names()
         for expected in ["intent_profiler", "plan_generator",
@@ -36,7 +35,7 @@ class TestDiscoverSkills:
             assert expected in names, f"Skill '{expected}' 未被发现"
 
     def test_all_skills_have_descriptions(self) -> None:
-        from app.agent.agent import discover_skills, SKILLS_DIR
+        from app.agent.agent import SKILLS_DIR, discover_skills
         skills = discover_skills(SKILLS_DIR)
         all_skills = skills.get_all_skills()
         skill_list = all_skills.values() if isinstance(all_skills, dict) else all_skills
@@ -45,7 +44,7 @@ class TestDiscoverSkills:
 
     def test_meta_tools_registered(self) -> None:
         """Skills 应自动注入 3 个元工具，不需要手写工具包装"""
-        from app.agent.agent import discover_skills, SKILLS_DIR
+        from app.agent.agent import SKILLS_DIR, discover_skills
         tools = discover_skills(SKILLS_DIR).get_tools()
         tool_names = {t.name for t in tools}
         assert tool_names == {"get_skill_instructions", "get_skill_reference", "get_skill_script"}
@@ -58,7 +57,7 @@ class TestDiscoverSkills:
 
     def test_executable_scripts_discovered(self) -> None:
         """每个有 scripts/ 目录的 Skill 应至少有一个脚本被发现"""
-        from app.agent.agent import discover_skills, SKILLS_DIR
+        from app.agent.agent import SKILLS_DIR, discover_skills
         skills = discover_skills(SKILLS_DIR)
         all_skills = skills.get_all_skills()
         skill_list = all_skills.values() if isinstance(all_skills, dict) else all_skills

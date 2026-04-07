@@ -21,10 +21,10 @@ from agno.team import Team, TeamMode
 from app.config import LLMConfig, load_config
 from app.outputs.sink import output_sink_hook
 
+from .config_agent import build_config_agent
+from .constraint_agent import build_constraint_agent
 from .intent_agent import build_intent_agent
 from .plan_agent import build_plan_agent
-from .constraint_agent import build_constraint_agent
-from .config_agent import build_config_agent
 
 logger = logging.getLogger("agent.team")
 

@@ -4,7 +4,8 @@ from __future__ import annotations
 from agno.agent import Agent
 
 from app.outputs.sink import output_sink_hook
-from .tools import get_pipeline_file, check_constraints, discover_extra_skills
+
+from .tools import check_constraints, discover_extra_skills, get_pipeline_file
 
 CONSTRAINT_PROMPT = """\
 你是约束校验专家。处理流程：
