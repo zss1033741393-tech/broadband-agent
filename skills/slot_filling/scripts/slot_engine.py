@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """槽位填充引擎 — 读取 slot_schema.yaml 驱动追问逻辑。
 
 作为 agno Skill 脚本被调用。接受 JSON 输入，返回槽位状态与追问提示。

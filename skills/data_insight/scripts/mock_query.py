@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """Mock 数据查询脚本 — 模拟网络质量数据查询。"""
 
 import json

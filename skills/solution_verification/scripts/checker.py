@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """Mock 约束校验脚本。
 
 模拟组网兼容性、性能冲突和 SLA 合规性检查。

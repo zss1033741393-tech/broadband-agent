@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """方案模板渲染脚本 — 根据用户画像渲染四类配置。
 
 作为 agno Skill 脚本被调用。

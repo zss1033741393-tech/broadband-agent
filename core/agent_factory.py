@@ -7,6 +7,7 @@ import yaml
 from loguru import logger
 
 from agno.agent import Agent
+from agno.db.sqlite.sqlite import SqliteDb
 from agno.skills import Skills
 from agno.skills.loaders.local import LocalSkills
 
@@ -68,6 +69,11 @@ def create_agent(session_id: str = None) -> Agent:
     # Skills
     skills = _load_skills(agent_cfg.get("skills_dir", "skills/"))
 
+    # SQLite 存储（用于 add_history_to_context）
+    db_path = _PROJECT_ROOT / "data" / "agent_sessions.db"
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    db = SqliteDb(db_file=str(db_path))
+
     # 构造 Agent
     agent = Agent(
         name=agent_cfg.get("name", "home-broadband-agent"),
@@ -75,6 +81,7 @@ def create_agent(session_id: str = None) -> Agent:
         system_message=system_prompt if system_prompt else None,
         skills=skills,
         session_id=session_id,
+        db=db,
         add_history_to_context=True,
         num_history_runs=agent_cfg.get("memory", {}).get("max_turns", 30),
         markdown=True,
