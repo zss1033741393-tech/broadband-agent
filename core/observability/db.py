@@ -50,6 +50,7 @@ CREATE TABLE IF NOT EXISTS tool_calls (
 CREATE TABLE IF NOT EXISTS traces (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     session_id INTEGER NOT NULL,
+    session_hash TEXT NOT NULL DEFAULT '',
     event_type TEXT NOT NULL,
     payload_json TEXT,
     created_at TEXT NOT NULL,
@@ -79,6 +80,12 @@ class Database:
         try:
             conn = self._get_conn()
             conn.executescript(_SCHEMA_SQL)
+            # 兼容旧 schema：traces 表可能缺少 session_hash 列
+            try:
+                conn.execute("ALTER TABLE traces ADD COLUMN session_hash TEXT NOT NULL DEFAULT ''")
+                conn.commit()
+            except sqlite3.OperationalError:
+                pass  # 列已存在，忽略
             conn.close()
             logger.info("SQLite schema 初始化完成")
         except Exception:
@@ -163,13 +170,13 @@ class Database:
             logger.exception("insert_tool_call 失败")
 
     # ---- traces ----
-    def insert_trace(self, session_id: int, event_type: str, payload: Any = None) -> None:
+    def insert_trace(self, session_id: int, session_hash: str, event_type: str, payload: Any = None) -> None:
         try:
             payload_str = json.dumps(payload, ensure_ascii=False, default=str) if payload else "{}"
             conn = self._get_conn()
             conn.execute(
-                "INSERT INTO traces (session_id, event_type, payload_json, created_at) VALUES (?, ?, ?, ?)",
-                (session_id, event_type, payload_str, _now_iso()),
+                "INSERT INTO traces (session_id, session_hash, event_type, payload_json, created_at) VALUES (?, ?, ?, ?, ?)",
+                (session_id, session_hash, event_type, payload_str, _now_iso()),
             )
             conn.commit()
             conn.close()

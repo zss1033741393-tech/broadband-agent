@@ -2,7 +2,7 @@
 
 import os
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Callable, Dict, List, Optional
 
 import yaml
 from loguru import logger
@@ -76,3 +76,25 @@ def create_model(config: Dict[str, Any] = None):
 
     logger.info(f"模型创建成功: {provider} / {common_params['id']}")
     return model
+
+
+def inject_prompt_tracer(model, prompt_callback: Callable[[list], None]) -> None:
+    """向已创建的 model 注入 prompt 追踪回调。
+
+    使用 monkey-patch 方式重写 ainvoke_stream，在调用上游 API 前触发回调，
+    不影响原有流式逻辑。
+    """
+    import types
+
+    original_ainvoke_stream = model.__class__.ainvoke_stream
+
+    async def _traced_ainvoke_stream(self, messages, *args, **kwargs):
+        try:
+            prompt_callback(messages)
+        except Exception:
+            pass  # trace 失败不影响主流程
+        async for chunk in original_ainvoke_stream(self, messages, *args, **kwargs):
+            yield chunk
+
+    # 仅修改当前实例，不影响其他实例
+    model.ainvoke_stream = types.MethodType(_traced_ainvoke_stream, model)

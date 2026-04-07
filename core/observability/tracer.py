@@ -53,13 +53,31 @@ class Tracer:
         """写入一条 trace 事件（SQLite + JSONL 双写）。"""
         try:
             if self.db_session_id is not None:
-                db.insert_trace(self.db_session_id, event_type, payload)
+                db.insert_trace(self.db_session_id, self.session_hash, event_type, payload)
             _write_jsonl(event_type, self.session_hash, payload)
         except Exception:
             print(f"[tracer] trace write failed: {event_type}", file=sys.stderr)
 
     def request(self, user_input: str) -> None:
         self.trace("request", {"input": user_input})
+
+    def llm_prompt(self, messages: list) -> None:
+        """记录发送给 LLM 的完整消息列表（system + history + user）。"""
+        # 将 agno Message 对象序列化为可读结构
+        serialized = []
+        for m in messages:
+            try:
+                role = getattr(m, "role", "unknown")
+                content = getattr(m, "content", "")
+                # 截断超长内容避免 trace 文件过大（超过 4096 字符截断）
+                if isinstance(content, str) and len(content) > 4096:
+                    content = content[:4096] + "...[truncated]"
+                elif isinstance(content, list):
+                    content = str(content)[:4096]
+                serialized.append({"role": str(role), "content": content})
+            except Exception:
+                serialized.append({"role": "unknown", "content": str(m)[:512]})
+        self.trace("llm_prompt", {"messages": serialized, "count": len(serialized)})
 
     def thinking(self, content: str) -> None:
         self.trace("thinking", {"content": content})

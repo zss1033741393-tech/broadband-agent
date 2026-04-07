@@ -12,6 +12,7 @@ from loguru import logger
 from agno.agent import Agent
 
 from core.agent_factory import create_agent
+from core.model_loader import inject_prompt_tracer
 from core.observability.db import db
 from core.observability.tracer import Tracer
 
@@ -45,8 +46,12 @@ class SessionManager:
         # 创建 Agent (使用 session_hash 作为 agno session_id)
         agent = create_agent(session_id=session_hash)
 
-        # 创建 Tracer
+        # 创建 Tracer，并向 model 注入 prompt 追踪回调
         tracer = Tracer(session_hash, db_session_id=db_sid)
+        try:
+            inject_prompt_tracer(agent.model, tracer.llm_prompt)
+        except Exception:
+            logger.warning("inject_prompt_tracer 失败，prompt 追踪不可用")
 
         ctx = SessionContext(
             session_hash=session_hash,
