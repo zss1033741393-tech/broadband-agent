@@ -229,8 +229,8 @@ def create_app() -> gr.Blocks:
             )
 
         def _re_enable():
-            """流式完成后重新启用发送按钮。"""
-            return gr.update(interactive=True)
+            """流式完成后重新启用输入框和发送按钮。"""
+            return gr.update(interactive=True), gr.update(interactive=True)
 
         def _chain(btn):
             """为按钮绑定三步链式事件：捕获 → 流式 → 恢复。"""
@@ -245,7 +245,7 @@ def create_app() -> gr.Blocks:
                 outputs=[chatbot],
             ).then(
                 fn=_re_enable,
-                outputs=[send_btn],
+                outputs=[msg_input, send_btn],
             )
 
         # 示例按钮点击 → 直接触发发送（无需中转到输入框）
