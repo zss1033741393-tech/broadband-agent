@@ -192,4 +192,4 @@ def create_app() -> gr.Blocks:
 
 if __name__ == "__main__":
     app = create_app()
-    app.launch(server_name="0.0.0.0", server_port=7860, theme=gr.themes.Soft())
+    app.launch(server_name="127.0.0.1", server_port=7860, theme=gr.themes.Soft())
