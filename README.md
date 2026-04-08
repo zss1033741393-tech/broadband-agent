@@ -49,7 +49,7 @@ python ui/app.py
 - `configs/model.yaml` — 模型 provider/endpoint 配置
 - `configs/agent.yaml` — Agent 配置
 - `configs/downstream.yaml` — 下游系统接口（mock/real 切换）
-- `configs/slot_schema.yaml` — 综合目标槽位定义
+- `skills/slot_filling/slot_schema.yaml` — 综合目标槽位定义（slot_filling Skill 内置）
 
 ## 测试
 

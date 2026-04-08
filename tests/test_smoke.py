@@ -16,7 +16,7 @@ def test_config_files_exist():
     assert (root / "configs" / "model.yaml").exists()
     assert (root / "configs" / "agent.yaml").exists()
     assert (root / "configs" / "downstream.yaml").exists()
-    assert (root / "configs" / "slot_schema.yaml").exists()
+    assert (root / "skills" / "slot_filling" / "slot_schema.yaml").exists()
 
 
 def test_model_config_loads():
@@ -40,7 +40,7 @@ def test_agent_config_loads():
 def test_slot_schema_loads():
     """slot_schema.yaml 可正常解析。"""
     import yaml
-    schema_path = Path(_ROOT) / "configs" / "slot_schema.yaml"
+    schema_path = Path(_ROOT) / "skills" / "slot_filling" / "slot_schema.yaml"
     with open(schema_path) as f:
         schema = yaml.safe_load(f)
     assert schema["root"] == "user_type"
