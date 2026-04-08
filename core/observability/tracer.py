@@ -61,8 +61,14 @@ class Tracer:
     def request(self, user_input: str) -> None:
         self.trace("request", {"input": user_input})
 
-    def llm_prompt(self, messages: list) -> None:
-        """记录发送给 LLM 的完整消息列表（system + history + user）。"""
+    def llm_prompt(
+        self,
+        messages: list,
+        *,
+        tools: Optional[list] = None,
+        tool_choice: Any = None,
+    ) -> None:
+        """记录发送给 LLM 的完整请求（messages + tools 定义 + tool_choice）。"""
         serialized = []
         for m in messages:
             try:
@@ -81,7 +87,16 @@ class Tracer:
                 serialized.append({"role": str(role), "content": content})
             except Exception:
                 serialized.append({"role": "unknown", "content": str(m)[:512]})
-        self.trace("llm_prompt", {"messages": serialized, "count": len(serialized)})
+
+        payload: dict[str, Any] = {"messages": serialized, "count": len(serialized)}
+
+        # 记录 Skills 工具定义（tools）——模型据此选择调用哪个 Skill
+        if tools:
+            payload["tools"] = tools
+        if tool_choice is not None:
+            payload["tool_choice"] = tool_choice
+
+        self.trace("llm_prompt", payload)
 
     def thinking(self, content: str) -> None:
         self.trace("thinking", {"content": content})
