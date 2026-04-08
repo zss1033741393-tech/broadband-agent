@@ -12,7 +12,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import yaml
 
 
-_SCHEMA_PATH = Path(__file__).resolve().parents[1] / "slot_schema.yaml"
+_SCHEMA_PATH = Path(__file__).resolve().parents[1] / "references" / "slot_schema.yaml"
 
 
 def load_schema() -> Dict[str, Any]:
