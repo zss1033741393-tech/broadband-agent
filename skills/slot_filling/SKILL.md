@@ -28,7 +28,7 @@ description: "槽位填充引擎：综合目标场景驱动追问收集画像；
 **行为**：
 1. 调用 `get_skill_script("slot_filling", "slot_engine.py", execute=True)` 初始化或更新槽位状态
 2. 引擎返回当前槽位状态和下一批追问
-3. 根据返回提示向用户提问（每次 1-2 个槽位）
+3. 根据返回提示向用户提问（每次 2-3 个槽位，减少交互轮数）
 4. 用户回答后重新调用引擎更新状态
 5. 所有必填槽位填齐后，引擎返回 `is_complete=true` 及完整 JSON
 6. 将 JSON 传递给 solution_generation

@@ -30,7 +30,7 @@ def get_missing_slots(schema: Dict, current_state: Dict) -> List[str]:
     return missing
 
 
-def get_next_questions(schema: Dict, current_state: Dict, max_questions: int = 2) -> List[Dict[str, str]]:
+def get_next_questions(schema: Dict, current_state: Dict, max_questions: int = 3) -> List[Dict[str, str]]:
     """返回下一批需要追问的槽位信息。"""
     slots_def = schema.get("slots", {})
     missing = get_missing_slots(schema, current_state)

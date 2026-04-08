@@ -34,7 +34,7 @@
 
 ## 3. 流程状态机
 
-每类任务的合法 Skill 调用顺序：
+每类任务的合法 Skill 调用顺序（遵循 **Pipeline** 范式，各阶段强制顺序执行）：
 
 ```
 综合目标:
@@ -51,6 +51,8 @@
 
 方括号 `[]` 表示可选步骤，需要用户确认后才执行。
 数据洞察路径中，slot_filling 以洞察结果为输入，具体行为详见 slot_filling Skill 说明。
+
+> **Skill 范式说明**（ADK 5 Design Patterns）：`slot_filling` = Inversion、`solution_generation` = Generator、`solution_verification` = Reviewer、`data_insight`/`*_config` = Tool Wrapper、整体流程 = Pipeline。各 Skill 的范式细节在各自 SKILL.md 中自描述。
 
 ## 4. Skill 调用协议
 
@@ -69,14 +71,11 @@
 1. `get_skill_instructions(skill_name)` → 查看 `available_scripts`
 2. `get_skill_script(skill_name, script_path=<available_scripts 中的文件名>)`
 
-## 5. 追问规则（Slot Filling）
+## 5. 综合目标追问规则
 
-进入综合目标流程后：
-1. 调用 `slot_filling` Skill 检查缺失槽位
-2. **每次只追问 1–2 个槽位**，不要一次问完所有问题
-3. 追问顺序严格遵循 slot_filling Skill 内置的 `slot_schema.yaml` 中的定义
-4. 用户提供的信息可能覆盖多个槽位，需要智能解析
-5. 所有槽位填齐后，输出结构化 JSON 并进入方案生成
+综合目标任务进入 `slot_filling` 后，该 Skill 采用 **Inversion 模式**自主管理追问流程（先访谈再执行）。系统 Prompt 不感知追问细节，具体行为（追问数量、顺序、槽位定义）详见 slot_filling Skill 说明。
+
+**关键编排约束**：`slot_filling` 返回 `is_complete=true` 后，方可调用 `solution_generation`。
 
 ## 6. 输出格式约束
 
