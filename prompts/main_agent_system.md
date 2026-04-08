@@ -69,6 +69,12 @@
 1. `get_skill_instructions(skill_name)` → 查看 `available_scripts`
 2. `get_skill_script(skill_name, script_path=<available_scripts 中的文件名>)`
 
+### args 参数格式（重要）
+
+调用 `get_skill_script` 时，`args` 参数必须为**字符串列表**（`List[str]`），每个元素对应一个命令行参数。  
+示例：`args=["--insight", "<json_string>"]`（两个参数）或 `args=["<json_string>"]`（一个参数）。  
+**禁止**将 `args` 作为单个字符串传入（如 `args="--insight <json>"`），否则会导致类型校验失败。
+
 ### 脚本输出处理规则
 
 `get_skill_script` 返回的 `stdout` 是脚本的最终产物：

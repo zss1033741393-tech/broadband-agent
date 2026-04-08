@@ -26,7 +26,7 @@ description: "槽位填充引擎：综合目标场景驱动追问收集画像；
 **调用方式**：`slot_engine.process(current_state_json, user_input)`
 
 **行为**：
-1. 调用 `get_skill_script("slot_filling", "slot_engine.py", execute=True)` 初始化或更新槽位状态
+1. 调用 `get_skill_script("slot_filling", "slot_engine.py", execute=True, args=["<user_input>", "<current_state_json>"])` 初始化或更新槽位状态
 2. 引擎返回当前槽位状态和下一批追问
 3. 根据返回提示向用户提问（每次 2-3 个槽位，减少交互轮数）
 4. 用户回答后重新调用引擎更新状态
@@ -40,7 +40,7 @@ description: "槽位填充引擎：综合目标场景驱动追问收集画像；
 **触发时机**：data_insight 执行完毕、用户要求生成优化方案时
 
 **行为**：
-1. 调用 `get_skill_script("slot_filling", "slot_engine.py", execute=True)` 并传入 data_insight 完整输出
+1. 调用 `get_skill_script("slot_filling", "slot_engine.py", execute=True, args=["--insight", "<insight_json_string>"])` 传入 data_insight 完整输出
 2. 脚本返回：
    - `extracted_slots`：已程序化确定的字段（time_window、complaint_history）
    - `slots_to_infer`：含推断线索的待推断字段列表

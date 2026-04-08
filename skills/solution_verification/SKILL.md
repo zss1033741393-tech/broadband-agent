@@ -19,9 +19,8 @@ description: "对生成的调优方案进行约束校验，检查组网兼容性
 - ❌ 方案尚未生成
 
 ## How to Use
-1. 调用 `get_skill_script("solution_verification", "checker.py", execute=True)` 执行校验
-2. 传入方案配置 JSON
-3. 返回校验结果
+1. 调用 `get_skill_script("solution_verification", "checker.py", execute=True, args=["<solution_json_string>"])` 执行校验
+2. 返回校验结果
 
 ## Scripts
 - `scripts/checker.py` — mock 约束检查脚本
