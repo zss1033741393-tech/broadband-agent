@@ -85,11 +85,8 @@ Orchestrator 把 `insight` 产出的 `summary` 作为 hints 注入，包含 `pri
 
 ## CEI 配置方案
 **启用**: true | false
-- CEI 阈值: <数字>
-- CEI 粒度: <minute | hour>
-- CEI 模型: <live_streaming | gaming | general | vvip>
-- 采集时段: <时段>
-- 目标 PON 口: <...>
+- 权重配置: <8 维度 CSV 字符串，如 ServiceQualityWeight:30,WiFiNetworkWeight:20,...>
+  # 8 维度权重加和应为 100，具体预设见 plan_design SKILL.md §业务默认值速查
 
 ## 故障诊断方案
 **启用**: true | false

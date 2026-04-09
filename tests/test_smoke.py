@@ -155,34 +155,37 @@ def test_plan_review_checker():
     assert len(result["checks"]) == 4
 
 
-def test_cei_pipeline_render():
-    mod = _load_script("cei_pipeline", "render.py")
-    result = json.loads(
-        mod.render(
-            json.dumps(
-                {
-                    "threshold": 70,
-                    "granularity": "minute",
-                    "model": "live_streaming",
-                    "time_window": "18:00-22:00",
-                    "target_pon": "全部",
-                }
-            )
-        )
-    )
-    assert result["skill"] == "cei_pipeline"
-    assert result["params"]["threshold"] == 70
-    assert "yaml_config" in result
-    assert "cei_spark" in result["yaml_config"]
-    assert "dispatch_result" in result
-
-
-def test_cei_pipeline_invalid_enum_falls_back():
-    mod = _load_script("cei_pipeline", "render.py")
-    # 非法 model 回退为默认值 general
-    result = json.loads(mod.render(json.dumps({"model": "bogus", "threshold": 65})))
-    assert result["params"]["model"] == "general"
-    assert result["params"]["threshold"] == 65
+def test_cei_pipeline_skill_schema():
+    """SKILL.md 声明新的 weights Tool Wrapper schema，旧 Generator schema 已清理。"""
+    skill_md = (
+        Path(_ROOT) / "skills" / "cei_pipeline" / "SKILL.md"
+    ).read_text(encoding="utf-8")
+    # 新 schema 关键字
+    for keyword in (
+        "Tool Wrapper",
+        "weights",
+        "ServiceQualityWeight",
+        "WiFiNetworkWeight",
+        "StabilityWeight",
+        "STAKPIWeight",
+        "GatewayKPIWeight",
+        "RateWeight",
+        "ODNWeight",
+        "OLTKPIWeight",
+        "fae_poc",
+        "cei_threshold_config.py",
+    ):
+        assert keyword in skill_md, f"SKILL.md 缺少关键字: {keyword}"
+    # 旧 schema 关键字应已被清理
+    for stale in (
+        "render.py",
+        "cei_spark",
+        "granularity",
+        "live_streaming",
+        "time_window",
+        "target_pon",
+    ):
+        assert stale not in skill_md, f"SKILL.md 残留旧 schema: {stale}"
 
 
 def test_fault_diagnosis_render():

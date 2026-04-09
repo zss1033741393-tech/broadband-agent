@@ -52,7 +52,7 @@ Orchestrator 只做关键词匹配，**不提取参数**，把用户原话作为
 | 切片 / 应用保障 / Appflow / 白名单 / 差异化 | `provisioning_delivery` | `[任务类型: 差异化承载开通]` |
 | 远程重启 / 远程优化 / 网关重启 / 闭环 | `provisioning_cei_chain` | `[任务类型: 单点远程操作]` |
 | 卡顿定界 / 故障诊断 / 故障树 / 故障定界 | `provisioning_cei_chain` | `[任务类型: 单点故障诊断]` |
-| CEI 阈值 / CEI 模型 / 体验评分 / CEI 配置 | `provisioning_cei_chain` | `[任务类型: 单点 CEI 配置]` |
+| CEI 权重 / CEI 阈值配置 / 业务质量权重 / 评分权重 / CEI 配置 | `provisioning_cei_chain` | `[任务类型: 单点 CEI 配置]` |
 
 关键词冲突时，按**最具体**原则选择（如同时出现 WIFI 和 CEI 按 Planning 路径处理）。
 

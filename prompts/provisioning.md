@@ -53,14 +53,13 @@
 示例（CEI 段落 → `cei_pipeline` schema）：
 ```
 方案段落:
-- CEI 阈值: 70
-- CEI 粒度: minute
-- CEI 模型: live_streaming
-...
+- 权重配置: ServiceQualityWeight:40,WiFiNetworkWeight:25,StabilityWeight:15,STAKPIWeight:5,GatewayKPIWeight:5,RateWeight:5,ODNWeight:3,OLTKPIWeight:2
 
-映射到 schema:
-{"threshold": 70, "granularity": "minute", "model": "live_streaming", ...}
+映射到 CLI args:
+["--weights", "ServiceQualityWeight:40,WiFiNetworkWeight:25,StabilityWeight:15,STAKPIWeight:5,GatewayKPIWeight:5,RateWeight:5,ODNWeight:3,OLTKPIWeight:2"]
 ```
+
+注意：`cei_pipeline` 是 Tool Wrapper 范式（与 `remote_optimization` 一致），`args` 是 argparse CLI 参数列表而非 JSON 字符串。其他参数 schema 驱动的 Generator 范式 Skill（如 `fault_diagnosis`、`differentiated_delivery`）仍然用 JSON 字符串形式。
 
 ### Step 3 — 缺失项处理
 
@@ -71,15 +70,22 @@
 ### Step 4 — 展示推导过程
 
 在调用 Skill 前，用自然语言简短说明：
-> 我从方案中识别到 CEI 阈值 70、粒度 minute、模型 live_streaming，保障时段 18:00-22:00；目标 PON 口方案未指定，使用默认值"全部"。
+> 我从方案中识别到 CEI 权重配置为 ServiceQualityWeight:40,WiFiNetworkWeight:25,StabilityWeight:15,STAKPIWeight:5,GatewayKPIWeight:5,RateWeight:5,ODNWeight:3,OLTKPIWeight:2（体现"走播场景业务质量优先"）；`config` 参数未指定，使用默认 `fae_poc/config.ini`。
 
 保证过程可观测，用户能审计参数来源。
 
 ### Step 5 — 调用 Skill
 
-通过 `get_skill_script(<skill_name>, <script_path>, execute=True, args=[<params_json_string>])` 执行。
+通过 `get_skill_script(<skill_name>, <script_path>, execute=True, args=[...])` 执行。
 
-**`args` 必须为 `List[str]`**，不得传字符串。参数以 JSON 字符串形式作为列表的唯一元素。
+**`args` 必须为 `List[str]`**（绝不传字符串），具体形式按 Skill 范式分两类：
+
+- **Generator 范式**（`fault_diagnosis` / `differentiated_delivery` / `wifi_simulation` / `data_insight` / `report_rendering`）
+  → `args = ["<params_json_string>"]`，整个参数对象用 JSON 字符串作为列表的唯一元素
+- **Tool Wrapper 范式**（`cei_pipeline` / `remote_optimization`）
+  → `args = ["--flag1", "value1", "--flag2", "value2", ...]`，按 argparse CLI 约定展开，每个 flag 和值都是独立的字符串元素；调用时建议显式传 `timeout=120` 为 FAE 网络交互留足预算
+
+混用形式会导致解析失败。具体示例以各 Skill 的 SKILL.md `How to Use` 章节为准。
 
 ### Step 6 — 透传产出
 
@@ -99,13 +105,25 @@ Skill 的 stdout（可能包含 YAML 配置、JSON 配置、ECharts 图表数据
 | `[任务类型: 单点故障诊断]` | **只调** `fault_diagnosis`，跳过 CEI 前置和闭环 |
 | `[任务类型: 单点远程操作]` | **只调** `remote_optimization`，跳过前置 |
 
-### 完整保障链的条件串行规则
+### 完整保障链的条件串行规则（当前含中间态 mock）
 
-1. **先**调用 `cei_pipeline` → 获取配置 + 体验评分摘要
-2. **若**评分低于阈值 → 调用 `fault_diagnosis` 做定界
-3. **若**诊断结果可远程修复 → 调用 `remote_optimization` 执行修复动作
-4. **否则**报告"需人工处置"，终止链路
-5. 每一步的结果作为下一步的上下文（在调用下一步前简短说明"基于 X 结果，下一步调用 Y"）
+1. **Step 1 · CEI 权重配置下发**：调用 `cei_pipeline` 的 `cei_threshold_config.py`
+   - 从方案段落的 `权重配置` 字段按 Tool Wrapper 约定拼出 `args=["--weights", "<CSV 字符串>"]`
+   - 透传 FAE 平台接口返回的 stdout / stderr / returncode，**不改写**
+2. **Step 2 · CEI 评分摘要（中间态 mock）** ⚠️
+   - **当前阶段 CEI 评分查询 Skill 尚未独立实现**，本步骤为中间态占位
+   - 由你（LLM）根据「关键画像」生成一个 mock 评分摘要，格式如：
+     ```json
+     {"pon": "PON-2/0/5", "score": 65, "threshold_hint": 70, "note": "中间态 mock，后续将由独立的 CEI 评分查询 Skill 提供真实数据"}
+     ```
+   - `threshold_hint` 来自套餐 → 阈值默认映射：直播套餐 70、专线套餐/VVIP 80、普通套餐 60（仅用于本步的门控判断，**不是** cei_pipeline 的输入）
+   - 必须在用户可见的回复里显式标注"【中间态 mock】"字样，保证流程可审计
+3. **Step 3 · 条件触发故障诊断**：**若** Step 2 mock 评分 `< threshold_hint` → 调用 `fault_diagnosis` 做定界
+4. **Step 4 · 条件触发远程闭环**：**若** Step 3 诊断结果可远程修复 → 调用 `remote_optimization` 执行修复动作
+5. **否则**报告"需人工处置"，终止链路
+6. 每一步的结果作为下一步的上下文（在调用下一步前简短说明"基于 X 结果，下一步调用 Y"）
+
+> 📌 Step 2 为中间态占位。待 CEI 评分查询 Skill 落地后，本节将改写为"调用 `cei_score_query` Skill"，其他步骤不变。
 
 ---
 
