@@ -57,11 +57,12 @@ description: "方案设计：根据用户画像或洞察摘要，生成 5 段式
 
 ## 远程闭环处置方案
 **启用**: true | false
-- 触发时机: <trigger_mode>  # immediate | idle
-- 操作: <action>  # gateway_restart | config_push | coverage_tune
-- 时间窗口: <time_window>
-- 远程覆盖弱调节: 开启 | 关闭
+- 执行策略: <strategy>  # immediate | idle | scheduled
+- 整改方式: <rectification_method>  # [1,2,3,4] 的任意子集，或"全部"
+- 执行时间: <operation_time>  # 仅 strategy=scheduled 时填写，格式 0-0-0-*-*-*
 ```
+
+**整改方式编号**：`1`=设备重启、`2`=信道切换、`3`=2.4G 功率调整、`4`=5G 功率调整。写段落时可写数字列表 `[1,2,3,4]` 或中文简写组合（Provisioning 侧会统一归一化）。
 
 每段**必须**包含 `**启用**: true/false` 这一行，字段名必须严格使用上面的中文标签，**便于 Orchestrator 按标题切分**。
 
@@ -73,7 +74,7 @@ description: "方案设计：根据用户画像或洞察摘要，生成 5 段式
 | 差异化承载方案 | `differentiated_delivery` | `slice_type, target_app, whitelist, bandwidth_guarantee_mbps` |
 | CEI 配置方案 | `cei_pipeline` | `threshold, granularity, model, time_window, target_pon` |
 | 故障诊断方案 | `fault_diagnosis` | `fault_tree_enabled, whitelist_rules, severity_threshold` |
-| 远程闭环处置方案 | `remote_optimization` | `trigger_mode, action, time_window, coverage_weak_enabled` |
+| 远程闭环处置方案 | `remote_optimization` | `strategy, rectification_method, operation_time` |
 
 ## 启用决策规则（LLM 推理规则）
 
@@ -105,9 +106,17 @@ description: "方案设计：根据用户画像或洞察摘要，生成 5 段式
 - 直播套餐 / 专线套餐 → `minute`
 - 普通套餐 → `hour`
 
-**场景 → 远程闭环覆盖弱调节**
-- 卖场走播 / 楼宇直播 → **关闭**（覆盖问题由 WIFI 仿真方案专门处理，避免双重调节）
-- 家庭直播 → 开启
+**场景 → 远程闭环执行策略 `strategy`**
+- 直播套餐（有业务时段保障）→ `idle`（闲时执行，避开直播时段）
+- 专线套餐 / VVIP → `immediate`（优先级最高）
+- 投诉处置 / 紧急恢复 → `immediate`
+- 常规维护 → `scheduled`，搭配 `operation_time` (如 `0-0-3-*-*-*` 凌晨 3 点)
+
+**场景 → 远程闭环整改方式 `rectification_method`**
+- 卖场走播（走动覆盖弱，忌重启打断业务）→ `[2, 3, 4]`（信道切换 + 2.4G/5G 功率调整，**不含重启**）
+- 楼宇直播（相对静态）→ `[1, 2, 3, 4]`（全部整改）
+- 家庭直播 → `[1, 2]`（重启 + 信道切换，最小影响）
+- 常规维护 / 意图不明 → 不填（代表"全部整改方式"）
 
 **场景 → 故障诊断白名单**
 - 直播场景 → 加入"偶发卡顿"白名单（避免误判持续故障）

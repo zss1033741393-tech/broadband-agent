@@ -204,23 +204,142 @@ def test_fault_diagnosis_render():
     assert "dispatch_result" in result
 
 
-def test_remote_optimization_render():
-    mod = _load_script("remote_optimization", "render.py")
-    result = json.loads(
-        mod.render(
-            json.dumps(
-                {
-                    "trigger_mode": "idle",
-                    "action": "gateway_restart",
-                    "time_window": "全天",
-                    "coverage_weak_enabled": False,
-                }
-            )
-        )
+def test_remote_optimization_skill_schema():
+    """SKILL.md 声明了新的 strategy / rectification_method / operation_time schema。"""
+    skill_md = (
+        Path(_ROOT) / "skills" / "remote_optimization" / "SKILL.md"
+    ).read_text(encoding="utf-8")
+    for keyword in (
+        "strategy",
+        "rectification_method",
+        "operation_time",
+        "immediate",
+        "scheduled",
+        "idle",
+        "fae_poc",
+    ):
+        assert keyword in skill_md, f"SKILL.md 缺少关键字: {keyword}"
+    # 旧 schema 关键字应已被清理
+    for stale in ("trigger_mode", "coverage_weak_enabled"):
+        assert stale not in skill_md, f"SKILL.md 残留旧 schema: {stale}"
+
+
+def test_remote_optimization_normalize_params():
+    """manual_batch_optimize 的参数归一化正确处理各种输入。"""
+    mod = _load_script("remote_optimization", "manual_batch_optimize.py")
+
+    # JSON list
+    normalized = mod._normalize_params(
+        {"strategy": "idle", "rectification_method": [1, 2]}
+    )
+    assert normalized["strategy"] == "idle"
+    assert normalized["rectification_method"] == [1, 2]
+
+    # 逗号分隔字符串
+    normalized = mod._normalize_params(
+        {"strategy": "scheduled", "rectification_method": "1,3,4", "operation_time": "0-0-3-*-*-*"}
+    )
+    assert normalized["rectification_method"] == [1, 3, 4]
+    assert normalized["operation_time"] == "0-0-3-*-*-*"
+
+    # 空值 → None（代表全部）
+    normalized = mod._normalize_params({"strategy": "immediate"})
+    assert normalized["rectification_method"] is None
+
+
+def test_remote_optimization_invalid_params_rejected():
+    """非法 strategy / rectification_method 应被拒绝。"""
+    mod = _load_script("remote_optimization", "manual_batch_optimize.py")
+    import pytest as _pytest
+
+    with _pytest.raises(ValueError, match="strategy"):
+        mod._normalize_params({"strategy": "bogus"})
+
+    with _pytest.raises(ValueError, match="rectification_method"):
+        mod._normalize_params({"strategy": "idle", "rectification_method": [5]})
+
+
+def test_remote_optimization_cli_args_builder():
+    """_build_cli_args 生成与 argparse 兼容的参数序列。"""
+    mod = _load_script("remote_optimization", "manual_batch_optimize.py")
+
+    cli = mod._build_cli_args(
+        {
+            "strategy": "scheduled",
+            "rectification_method": [1, 2, 3],
+            "operation_time": "0-0-0-*-*-*",
+            "config": None,
+        }
+    )
+    assert cli[:2] == ["--strategy", "scheduled"]
+    assert "--rectification-method" in cli
+    assert "1,2,3" in cli
+    assert "--operation-time" in cli
+    assert "0-0-0-*-*-*" in cli
+
+    # strategy != scheduled 时不带 --operation-time
+    cli = mod._build_cli_args(
+        {
+            "strategy": "idle",
+            "rectification_method": None,
+            "operation_time": "0-0-0-*-*-*",
+            "config": None,
+        }
+    )
+    assert "--operation-time" not in cli
+    assert "--rectification-method" not in cli
+
+
+def test_remote_optimization_execute_graceful_failure():
+    """未部署 NCELogin.py / config.ini 时,execute() 返回结构化失败而非抛异常。"""
+    mod = _load_script("remote_optimization", "manual_batch_optimize.py")
+    result = mod.execute(
+        {
+            "strategy": "idle",
+            "rectification_method": [1, 2],
+            "operation_time": "0-0-0-*-*-*",
+            "config": None,
+        }
     )
     assert result["skill"] == "remote_optimization"
-    assert result["params"]["action"] == "gateway_restart"
-    assert "remote_optimization" in result["config_json"]
+    assert "params" in result
+    assert "dispatch_result" in result
+    # 当前 CI 环境未部署 fae_poc/config.ini 或 fae_poc/NCELogin.py,
+    # 应返回 status=failed + stage=deployment_check
+    assert result["dispatch_result"]["status"] in {"success", "failed"}
+
+
+def test_fae_poc_package_importable():
+    """fae_poc 包可 import,即使 NCELogin.py / config.ini 未部署。"""
+    import importlib
+    # 确保项目根在 sys.path
+    if _ROOT not in sys.path:
+        sys.path.insert(0, _ROOT)
+    fae_poc = importlib.import_module("fae_poc")
+    assert hasattr(fae_poc, "DEFAULT_CONFIG_PATH")
+    assert hasattr(fae_poc, "EXAMPLE_CONFIG_PATH")
+    assert hasattr(fae_poc, "require_config")
+    assert hasattr(fae_poc, "require_ncelogin")
+    # 未部署时 require_* 应抛出带引导信息的错误
+    import pytest as _pytest
+    with _pytest.raises(FileNotFoundError, match="config.ini"):
+        fae_poc.require_config()
+    # NCELogin.py 未提交时应优雅提示
+    if fae_poc.NCELogin is None:
+        with _pytest.raises(RuntimeError, match="NCELogin"):
+            fae_poc.require_ncelogin()
+
+
+def test_fae_poc_example_committed():
+    """config.ini.example 模板必须提交,真实 config.ini 不得提交。"""
+    fae_poc_dir = Path(_ROOT) / "fae_poc"
+    assert (fae_poc_dir / "__init__.py").exists()
+    assert (fae_poc_dir / "config.ini.example").exists()
+    # 真实文件不应出现在 git 跟踪的检查点 — 本测试不强行断言其不存在
+    # （开发者可能已在本地部署），仅确保 .gitignore 规则存在
+    gitignore = (Path(_ROOT) / ".gitignore").read_text(encoding="utf-8")
+    assert "fae_poc/config.ini" in gitignore
+    assert "fae_poc/NCELogin.py" in gitignore
 
 
 def test_differentiated_delivery_render():

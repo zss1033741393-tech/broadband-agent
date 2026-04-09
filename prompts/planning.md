@@ -99,10 +99,9 @@ Orchestrator 把 `insight` 产出的 `summary` 作为 hints 注入，包含 `pri
 
 ## 远程闭环处置方案
 **启用**: true | false
-- 触发时机: <immediate | idle | scheduled>
-- 操作: <gateway_restart | config_push | coverage_tune | speed_test>
-- 时间窗口: <时段>
-- 远程覆盖弱调节: 开启 | 关闭
+- 执行策略: <immediate | idle | scheduled>
+- 整改方式: <[1,2,3,4] 的任意子集 或 "全部">  # 1=设备重启, 2=信道切换, 3=2.4G功率调整, 4=5G功率调整
+- 执行时间: <0-0-0-*-*-* 格式 cron>  # 仅 strategy=scheduled 时填写
 ```
 
 **完整规则**（业务默认值、启用决策、字段 ↔ Skill schema 对齐表）请严格参考 `plan_design` SKILL.md 中的说明。

@@ -211,3 +211,7 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# Fae POC 真实凭证与内部模块 — 永不提交
+fae_poc/config.ini
+fae_poc/NCELogin.py
