@@ -798,6 +798,87 @@ def test_chat_handler_member_badge_once_per_member():
 # ============================================================================
 
 
+def test_render_tool_call_started_returns_single_folded_block():
+    """ToolCallStarted 阶段只有 inputs → 单条折叠块。"""
+    from ui.chat_renderer import render_tool_call
+
+    msgs = render_tool_call(
+        "cei_pipeline",
+        inputs={"weights": "ServiceQualityWeight:40"},
+        member="provisioning_cei_chain",
+    )
+    assert isinstance(msgs, list)
+    assert len(msgs) == 1
+    assert msgs[0]["metadata"]["title"].startswith("🔧")
+    assert "体验保障链" in msgs[0]["metadata"]["title"]
+    assert "ServiceQualityWeight" in msgs[0]["content"]
+
+
+def test_render_tool_call_completed_splits_stdout_into_expanded_block():
+    """ToolCallCompleted 含 stdout → 折叠元数据块 + 展开产物块。"""
+    from ui.chat_renderer import render_tool_call
+
+    outputs = {
+        "script_path": "scripts/cei_threshold_config.py",
+        "returncode": 0,
+        "stdout": '{"status": "success", "config_id": "CEI-12345"}',
+        "stderr": "",
+    }
+    msgs = render_tool_call("cei_pipeline", outputs=outputs)
+    assert len(msgs) == 2
+    # 折叠块 (审计元数据)
+    assert msgs[0]["metadata"]["title"].startswith("🔧")
+    assert "returncode=0" in msgs[0]["content"]
+    assert "✅" in msgs[0]["content"]
+    # 展开块 (产物正文,无 metadata.title → Gradio 默认展开)
+    assert "metadata" not in msgs[1]
+    assert "cei_pipeline 产出" in msgs[1]["content"]
+    assert "CEI-12345" in msgs[1]["content"]
+    assert "```json" in msgs[1]["content"]
+
+
+def test_render_tool_call_completed_markdown_stdout_inlined_raw():
+    """stdout 以 '#' 开头的 Markdown 报告 → 展开块不加代码块包裹。"""
+    from ui.chat_renderer import render_tool_call
+
+    outputs = {
+        "script_path": "scripts/render_report.py",
+        "returncode": 0,
+        "stdout": "# 网络质量洞察报告\n\n## PON-2/0/5\n- 带宽利用率过高",
+        "stderr": "",
+    }
+    msgs = render_tool_call("report_rendering", outputs=outputs)
+    assert len(msgs) == 2
+    assert "```" not in msgs[1]["content"].split("report_rendering 产出")[1][:20]
+    assert "# 网络质量洞察报告" in msgs[1]["content"]
+
+
+def test_render_tool_call_completed_failure_no_stdout_single_block():
+    """脚本失败且无 stdout → 只有折叠块,无展开块。"""
+    from ui.chat_renderer import render_tool_call
+
+    outputs = {
+        "script_path": "scripts/cei_threshold_config.py",
+        "returncode": 1,
+        "stdout": "",
+        "stderr": "FAE connection refused",
+    }
+    msgs = render_tool_call("cei_pipeline", outputs=outputs)
+    assert len(msgs) == 1
+    assert "❌" in msgs[0]["content"]
+    assert "FAE connection refused" in msgs[0]["content"]
+
+
+def test_render_tool_call_completed_non_skill_output_single_block():
+    """非 Skill 脚本返回 (无 stdout 键) → 单条折叠块包裹 JSON。"""
+    from ui.chat_renderer import render_tool_call
+
+    outputs = {"status": "ok", "data": [1, 2, 3]}
+    msgs = render_tool_call("some_internal_tool", outputs=outputs)
+    assert len(msgs) == 1
+    assert "**返回结果**" in msgs[0]["content"]
+
+
 def test_localskills_loads_all():
     """LocalSkills 能扫描并加载 10 个 Skill。"""
     from agno.skills.loaders.local import LocalSkills
