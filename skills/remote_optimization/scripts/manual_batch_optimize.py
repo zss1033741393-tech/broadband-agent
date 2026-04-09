@@ -30,16 +30,24 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 # ─── fae_poc 包注入 ────────────────────────────────────────────────────
-# 从 skills/<skill>/scripts/<file> 向上 3 级定位项目根，使 `fae_poc` 可被导入
+# 从 skills/<skill>/scripts/<file> 向上 3 级定位项目根，再拼出 fae_poc 目录。
+# 两条路径都注入 sys.path，这样以下两种导入风格都可用：
+#
+#   (A) from fae_poc import NCELogin, DEFAULT_CONFIG_PATH, require_config
+#       — 通过项目根上的 fae_poc 包导入，适合新写的脚本
+#
+#   (B) from NCELogin import NCELogin
+#       — bare 导入，适合直接复用本地 "Fae POC" 项目里原样迁移过来的脚本
+#         （那些脚本通常写的就是 `from NCELogin import NCELogin`）
 _PROJECT_ROOT = Path(__file__).resolve().parents[3]
-if str(_PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(_PROJECT_ROOT))
+_FAE_POC_DIR = _PROJECT_ROOT / "fae_poc"
+for _p in (str(_PROJECT_ROOT), str(_FAE_POC_DIR)):
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
 
-from fae_poc import (  # noqa: E402
-    DEFAULT_CONFIG_PATH,
-    require_config,
-    require_ncelogin,
-)
+# fae_poc 包的辅助对象（用于拿默认 config 路径 + 校验函数）。
+# NCELogin 本体延后到 execute() 里用 bare 导入 try/except 保护。
+from fae_poc import DEFAULT_CONFIG_PATH, require_config  # noqa: E402
 
 
 # ─── 参数 schema ───────────────────────────────────────────────────────
@@ -135,18 +143,21 @@ def execute(params: Dict[str, Any]) -> Dict[str, Any]:
         参数非法、接口报错都会以 `dispatch_result.status=failed` 的形式返回，
         保证 Skill 上层总能获得一个结构化 JSON 透传给用户。
     """
+    # 统一展示 effective config path（用户传入为空时回退到默认），便于 stdout 审计
+    effective_config = params.get("config") or str(DEFAULT_CONFIG_PATH)
+    display_params = {**params, "config": effective_config}
     result: Dict[str, Any] = {
         "skill": "remote_optimization",
-        "params": dict(params),
-        "cli_args": _build_cli_args(params),
+        "params": display_params,
+        "cli_args": _build_cli_args(display_params),
     }
 
+    # Step 1: 校验 config.ini 存在并解析出绝对路径
     try:
         config_path = require_config(
             Path(params["config"]) if params.get("config") else DEFAULT_CONFIG_PATH
         )
-        NCELoginCls = require_ncelogin()
-    except (FileNotFoundError, RuntimeError) as exc:
+    except FileNotFoundError as exc:
         result["dispatch_result"] = {
             "status": "failed",
             "stage": "deployment_check",
@@ -155,31 +166,54 @@ def execute(params: Dict[str, Any]) -> Dict[str, Any]:
         }
         return result
 
-    # 至此 config.ini 与 NCELogin 均已就绪，回写解析后的 config 绝对路径
+    # 至此 config.ini 就绪,回写解析后的 config 绝对路径 (便于 stdout 审计)
     result["params"]["config"] = str(config_path)
     result["cli_args"] = _build_cli_args(result["params"])
 
+    # Step 2: bare 导入 NCELogin
+    # 这里使用 `from NCELogin import NCELogin` 而非 `from fae_poc import NCELogin`,
+    # 为的是与用户本地 "Fae POC" 项目里原样迁移过来的脚本保持相同的导入风格 ——
+    # 它们通常就写成 `from NCELogin import NCELogin` (依赖 fae_poc/ 在 sys.path 上,
+    # 由文件顶部 prelude 负责注入).
+    try:
+        from NCELogin import NCELogin  # type: ignore  # noqa: E402,F401
+    except ImportError as exc:
+        result["dispatch_result"] = {
+            "status": "failed",
+            "stage": "ncelogin_import",
+            "message": (
+                f"无法导入 NCELogin: {exc}. "
+                f"请将本地 Fae POC 项目的 NCELogin.py 拷贝到 {_FAE_POC_DIR}/NCELogin.py 后重试."
+            ),
+            "task_id": None,
+        }
+        return result
+
+    # Step 3: 调用真实接口
     try:
         # TODO(用户): 按 NCELogin 的实际 API 调整以下调用
         # ──────────────────────────────────────────────────────────
-        # 下面是一个占位样板，请替换为真实接口。典型流程：
-        #   client = NCELoginCls(config_path)
-        #   response = client.manual_batch_optimize(
+        # 下面是占位样板,请替换为真实接口.典型流程:
+        #   nce_login = NCELogin(config_file=str(config_path))
+        #   response = nce_login.manual_batch_optimize(
         #       strategy=params["strategy"],
         #       rectification_method=params["rectification_method"],
         #       operation_time=params["operation_time"].replace("-", " "),
         #   )
         #   result["dispatch_result"] = {
-        #       "status": "success" if response.ok else "failed",
+        #       "status": "success" if response.get("code") == 0 else "failed",
         #       "message": response.get("message", ""),
         #       "task_id": response.get("taskId"),
         #       "raw": response,
         #   }
-        client = NCELoginCls(str(config_path))  # noqa: F841  [placeholder]
+        nce_login = NCELogin(config_file=str(config_path))  # noqa: F841  [placeholder]
         result["dispatch_result"] = {
             "status": "success",
             "stage": "placeholder",
-            "message": "manual_batch_optimize 调用占位：请在 execute() 中接入真实 NCELogin API",
+            "message": (
+                "manual_batch_optimize 调用占位: NCELogin 已实例化,"
+                "请在 execute() 的 TODO 处接入真实 API 调用."
+            ),
             "task_id": None,
         }
     except Exception as exc:
@@ -232,8 +266,11 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     parser.add_argument(
         "--config",
         "-c",
-        default=None,
-        help=f"config.ini 绝对路径，留空使用默认 {DEFAULT_CONFIG_PATH}",
+        default=str(DEFAULT_CONFIG_PATH),
+        help=(
+            "config.ini 绝对路径，默认指向项目根 fae_poc/config.ini "
+            f"({DEFAULT_CONFIG_PATH})"
+        ),
     )
     return parser.parse_args(argv)
 

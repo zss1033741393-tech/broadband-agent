@@ -305,8 +305,60 @@ def test_remote_optimization_execute_graceful_failure():
     assert "params" in result
     assert "dispatch_result" in result
     # 当前 CI 环境未部署 fae_poc/config.ini 或 fae_poc/NCELogin.py,
-    # 应返回 status=failed + stage=deployment_check
-    assert result["dispatch_result"]["status"] in {"success", "failed"}
+    # 应返回 status=failed + stage=deployment_check 或 ncelogin_import
+    assert result["dispatch_result"]["status"] == "failed"
+    assert result["dispatch_result"]["stage"] in {
+        "deployment_check",
+        "ncelogin_import",
+    }
+
+
+def test_remote_optimization_dual_syspath_injection():
+    """脚本顶部 prelude 同时注入项目根 + fae_poc 目录到 sys.path。
+
+    这保证 `from fae_poc import ...` 和 `from NCELogin import NCELogin`
+    两种导入风格都能工作。
+    """
+    # 加载脚本 (触发其顶部的 sys.path 注入)
+    _load_script("remote_optimization", "manual_batch_optimize.py")
+    assert _ROOT in sys.path, "项目根未注入 sys.path"
+    fae_poc_dir = str(Path(_ROOT) / "fae_poc")
+    assert fae_poc_dir in sys.path, "fae_poc/ 目录未注入 sys.path"
+
+
+def test_remote_optimization_bare_ncelogin_import_works():
+    """验证 bare 导入 `from NCELogin import NCELogin` 的路径在 CI 环境也可工作。
+
+    做法: 临时在 fae_poc/ 下放一个 stub NCELogin.py,触发导入,然后清理。
+    测试结束后不能残留 stub,也不能污染 sys.modules。
+    """
+    _load_script("remote_optimization", "manual_batch_optimize.py")
+
+    fae_poc_dir = Path(_ROOT) / "fae_poc"
+    stub_path = fae_poc_dir / "NCELogin.py"
+    stub_existed = stub_path.exists()
+    backup = stub_path.read_text(encoding="utf-8") if stub_existed else None
+
+    try:
+        if not stub_existed:
+            stub_path.write_text(
+                "class NCELogin:\n"
+                "    def __init__(self, config_file=None):\n"
+                "        self.config_file = config_file\n",
+                encoding="utf-8",
+            )
+        # 确保缓存被清理后重新导入
+        sys.modules.pop("NCELogin", None)
+        import NCELogin as _bare  # type: ignore  # noqa: F401
+        assert hasattr(_bare, "NCELogin")
+        instance = _bare.NCELogin(config_file="/tmp/fake.ini")
+        assert instance.config_file == "/tmp/fake.ini"
+    finally:
+        sys.modules.pop("NCELogin", None)
+        if not stub_existed and stub_path.exists():
+            stub_path.unlink()
+        elif stub_existed and backup is not None:
+            stub_path.write_text(backup, encoding="utf-8")
 
 
 def test_fae_poc_package_importable():

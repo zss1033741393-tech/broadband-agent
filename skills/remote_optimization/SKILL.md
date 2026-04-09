@@ -104,15 +104,51 @@ python manual_batch_optimize.py --config /abs/path/to/fae_poc/config.ini
 ```
 broadband-agent/
 ├── fae_poc/
-│   ├── __init__.py          # 导出 NCELogin, DEFAULT_CONFIG_PATH
+│   ├── __init__.py          # 导出 DEFAULT_CONFIG_PATH / require_config 等辅助
 │   ├── NCELogin.py          # 用户本地部署（.gitignore 忽略）
-│   └── config.ini           # 用户本地部署（.gitignore 忽略）
+│   ├── config.ini           # 用户本地部署（.gitignore 忽略）
+│   └── config.ini.example   # 占位模板（提交）
 └── skills/remote_optimization/
     └── scripts/
-        └── manual_batch_optimize.py  # 顶部做 sys.path 注入后 import fae_poc
+        └── manual_batch_optimize.py  # 顶部做双路径注入后调用 NCELogin
 ```
 
-初次部署时，将本地的 `NCELogin.py` 和 `config.ini` 放入 `fae_poc/` 目录。详见 `fae_poc/README.md`。
+初次部署：
+1. 把本地 Fae POC 项目的 `NCELogin.py` 拷贝到 `fae_poc/NCELogin.py`
+2. 把 `fae_poc/config.ini.example` 复制为 `fae_poc/config.ini` 并填入真实 `base_url` / `csrf_token` / `cookie`
+3. 两个文件已在 `.gitignore` 中排除，不会误提交
+
+### 脚本顶部 prelude (复用到 cei_pipeline / fault_diagnosis 等其他真实接口脚本)
+
+```python
+import sys
+from pathlib import Path
+
+# 项目根 → 使 `from fae_poc import ...` 辅助对象可用
+# fae_poc 目录 → 使 `from NCELogin import NCELogin` 这种 bare 导入可用
+# 两者都注入,同时兼容两种导入风格
+_PROJECT_ROOT = Path(__file__).resolve().parents[3]
+_FAE_POC_DIR = _PROJECT_ROOT / "fae_poc"
+for _p in (str(_PROJECT_ROOT), str(_FAE_POC_DIR)):
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
+
+from fae_poc import DEFAULT_CONFIG_PATH, require_config  # noqa: E402
+# NCELogin 延迟到 main() 里 import, 这样部署缺失时也能返回结构化错误而非 crash
+```
+
+在 main() 里：
+
+```python
+def main():
+    args = parse_args()
+    config_path = require_config(args.config)  # 校验并返回绝对路径
+    from NCELogin import NCELogin               # bare 导入,与本地 Fae POC 项目一致
+    nce_login = NCELogin(config_file=str(config_path))
+    # ... 调用 nce_login 的业务方法 ...
+```
+
+**重要**：如果从本地 "Fae POC" 项目直接迁移脚本过来，argparse 里的 `--config` 默认值往往是 `'../../config.ini'` 这类相对路径，放到本项目目录结构后会解析错位。**务必**改为 `default=str(DEFAULT_CONFIG_PATH)`，这样 `args.config` 永远是一个有效的绝对路径。
 
 ## Scripts
 
