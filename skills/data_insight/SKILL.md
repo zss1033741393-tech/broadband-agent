@@ -1,48 +1,104 @@
 ---
 name: data_insight
-description: "数据洞察分析，查询网络质量数据并进行归因分析，找出问题 PON 口和异常指标"
+description: "数据洞察：按阶段查询网络质量数据 + 归因分析，输出数据 + 分析文本 + ECharts 可视化配置"
 ---
 
-# 数据洞察分析
+# 数据洞察
 
 ## Metadata
-- **name**: data_insight
-- **description**: 查询网络数据 + 归因分析，找出问题点
-- **when_to_use**: 用户要求分析网络数据、查找问题 PON 口、分析 CEI 分数时
-- **paradigm**: Tool-augmented + Workflow
-- **inputs**: 用户的分析诉求（自然语言）
-- **outputs**: 分析结果（数据 + 归因）
+- **paradigm**: Pipeline + Tool-augmented
+- **when_to_use**: InsightAgent 需要进行网络质量数据查询或归因分析
+- **inputs**: 阶段标识（`stage`）+ 可选过滤条件（`query_type`）
+- **outputs**: `{data, analysis, echarts_option, stage, summary}` JSON
 
-## When to Use
-- ✅ 用户说"找出 CEI 分数低的 PON 口"、"分析网络质量"、"为什么 xx 指标异常"
-- ✅ 主 Agent 判定为"数据洞察类"任务
-- ❌ 用户要求生成配置（应使用具体功能 Skill）
+## 阶段契约（4 阶段对应 4 种调用）
 
-## How to Use
-1. 调用 `get_skill_script("data_insight", "mock_query.py", execute=True)` 查询数据
-2. 分析返回的数据，识别异常点
-3. 进行归因分析（原型阶段基于规则）
-4. 将结果传递给 report_generation 生成报告
-5. 若用户随后要求生成优化方案，将完整输出（含 `config_hints`）传递给 slot_filling
-
-## Scripts
-- `scripts/mock_query.py` — mock 数据查询脚本
+| 阶段 | `stage` 值 | 产出 ECharts 图类型 | 说明 |
+|---|---|---|---|
+| 1. 需求理解 | `intent` | — | 不调用本脚本，InsightAgent LLM 自行判断 |
+| 2. 数据查询 | `query` | 柱状图（按 PON 口 CEI 排名）+ 线图（时序趋势） | 返回原始数据 + echarts_option |
+| 3. 归因分析 | `attribution` | 热力图（PON 口问题分布）+ 雷达图（异常指标） | 返回归因结果 + echarts_option |
+| 4. 报告生成 | — | — | 调用 `report_rendering` Skill，不调用本 Skill |
 
 ## Output Schema
 
-脚本输出除 `data` / `analysis` / `summary` 外，还包含 `config_hints` 块，供后续 Skill 使用：
+```json
+{
+  "skill": "data_insight",
+  "stage": "query" | "attribution",
+  "data": [...],                    // 原始数据（stage=query 时）
+  "analysis": [...],                // 归因分析（stage=attribution 时）
+  "echarts_option": { ... },        // ECharts option JSON,直接可渲染
+  "summary": {
+    "priority_pons": [...],
+    "distinct_issues": [...],
+    "scope_indicator": "single_pon" | "multi_pon" | "regional",
+    "peak_time_window": "19:00-22:00" | null,
+    "has_complaints": true,
+    "remote_loop_candidates": [...]
+  }
+}
+```
 
-| 字段 | 含义 | 下游用途 |
-|------|------|---------|
-| `config_hints.priority_pons` | CEI < 60 的问题 PON 口 | CEI/远程闭环配置目标 |
-| `config_hints.watch_pons` | CEI 60-75 的观察 PON 口 | 持续监控 |
-| `config_hints.distinct_issues` | 所有异常类型汇总（原始中文） | fault_config 检测规则推断 |
-| `config_hints.scope_indicator` | 问题波及范围（single_pon / multi_pon / regional） | 推断 guarantee_target 槽位 |
-| `config_hints.peak_time_window` | 推断的高峰时段（如 "19:00-22:00"，无则 null） | 推断 time_window 槽位 |
-| `config_hints.has_complaints` | 是否存在用户投诉 | 推断 complaint_history 槽位 |
-| `config_hints.remote_loop_candidates` | 建议开启自动闭环的 PON 口 | remote_loop 配置优先级 |
+**关键字段**：
+- `echarts_option` — 完整的 ECharts option 对象，Agent 透传给前端即可渲染；**不得改写**
+- `summary` — 结构化摘要，供 Orchestrator 在洞察回流 Planning 时作为 hints 注入
+
+## When to Use
+
+- ✅ 用户要求查询 PON 口排名 / 分析 CEI 分布 / 找异常原因
+- ✅ 区域性保障的第一步（场景 2）
+- ❌ 用户要求生成配置（应走 Planning/Provisioning 路径）
+- ❌ 单点功能（场景 3）
+
+## How to Use
+
+### 阶段 2 — 数据查询
+```
+get_skill_script(
+    "data_insight",
+    "mock_query.py",
+    execute=True,
+    args=["query", "<query_type>"]
+)
+```
+`query_type` ∈ `{all, low_cei, high_util}`（可选，默认 `all`）
+
+### 阶段 3 — 归因分析
+```
+get_skill_script(
+    "data_insight",
+    "mock_query.py",
+    execute=True,
+    args=["attribution"]
+)
+```
+
+## Scripts
+
+- `scripts/mock_query.py` — Mock 数据查询与归因分析，按 `stage` 参数产出不同 ECharts 配置
 
 ## Examples
 
-**输入**: "找出 CEI 分数较低的 PON 口并分析原因"
-**输出**: PON 口排名 + 异常指标 + 可能原因分析
+**查询阶段返回**（简化）:
+```json
+{
+  "skill": "data_insight",
+  "stage": "query",
+  "data": [
+    {"pon_port": "PON-2/0/5", "cei_score": 48.9, ...}
+  ],
+  "echarts_option": {
+    "title": {"text": "PON 口 CEI 评分排名"},
+    "xAxis": {"type": "category", "data": ["PON-2/0/5", ...]},
+    "yAxis": {"type": "value"},
+    "series": [{"type": "bar", "data": [48.9, ...]}]
+  },
+  "summary": { ... }
+}
+```
+
+## 禁止事项
+
+- ❌ 不在本 Skill 里做方案推荐（方案归 PlanningAgent）
+- ❌ 不得改写或精简 echarts_option（前端直接渲染）

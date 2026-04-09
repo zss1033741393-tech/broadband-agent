@@ -1,9 +1,9 @@
-"""Gradio Web UI 入口 — 单用户多会话。"""
+"""Gradio Web UI 入口 — 单用户多会话，驱动 agno Team。"""
 
 import sys
 import uuid
 from pathlib import Path
-from typing import Any, AsyncIterator, Dict, List, Optional, Tuple
+from typing import Any, AsyncIterator, Dict, List, Optional
 
 import gradio as gr
 from loguru import logger
@@ -14,12 +14,40 @@ if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
 
 from core.observability.logger import setup_logger
-from core.session_manager import SessionContext, session_manager
 from core.observability.db import db
-from ui.chat_renderer import render_thinking, render_tool_call, render_response
+from core.session_manager import SessionContext, session_manager
+from ui.chat_renderer import (
+    render_member_badge,
+    render_response,
+    render_thinking,
+    render_tool_call,
+)
 
 # 初始化日志
 setup_logger()
+
+
+# 把事件名中的 Team 前缀去掉便于统一匹配（Team 事件与 Agent 事件结构一致）
+def _normalize_event_type(raw: str) -> str:
+    if not raw:
+        return ""
+    if raw.startswith("Team"):
+        return raw[len("Team"):]
+    return raw
+
+
+def _extract_member_name(event: Any) -> Optional[str]:
+    """从事件对象上尝试识别当前发言的 SubAgent 名字。"""
+    for attr in ("agent_name", "member_name", "from_agent", "agent_id"):
+        val = getattr(event, attr, None)
+        if val:
+            return str(val)
+    agent = getattr(event, "agent", None)
+    if agent is not None:
+        name = getattr(agent, "name", None)
+        if name:
+            return str(name)
+    return None
 
 
 async def chat_handler(
@@ -27,7 +55,7 @@ async def chat_handler(
     history: List[Dict[str, Any]],
     session_state: Optional[Dict] = None,
 ) -> AsyncIterator[List[Dict[str, Any]]]:
-    """Gradio chat handler — 异步流式输出。"""
+    """Gradio chat handler — 异步流式输出 Team 事件。"""
     if not message or not message.strip():
         yield history
         return
@@ -36,31 +64,22 @@ async def chat_handler(
     session_hash = (session_state or {}).get("session_hash", str(uuid.uuid4()))
     ctx = session_manager.get_or_create(session_hash)
 
-    # Trace: 记录用户请求
+    # Trace 用户请求
     ctx.tracer.request(message)
-    db.insert_message(ctx.db_session_id, "user", message) if ctx.db_session_id else None
+    if ctx.db_session_id:
+        db.insert_message(ctx.db_session_id, "user", message)
 
     # 添加用户消息到历史
     history = history + [{"role": "user", "content": message}]
     yield history
 
-    # 运行 Agent (流式)
+    full_content = ""
+    reasoning_buffer = ""
+    current_member: Optional[str] = None
+    last_rendered_member: Optional[str] = None
+
     try:
-        from agno.run.agent import (
-            RunEvent,
-            RunContentEvent,
-            RunCompletedEvent,
-            ToolCallStartedEvent,
-            ToolCallCompletedEvent,
-            ReasoningStepEvent,
-            ReasoningContentDeltaEvent,
-        )
-
-        full_content = ""
-        reasoning_buffer = ""
-        current_tool = None
-
-        response_stream = ctx.agent.arun(
+        response_stream = ctx.team.arun(
             message,
             session_id=session_hash,
             stream=True,
@@ -68,70 +87,93 @@ async def chat_handler(
         )
 
         async for event in response_stream:
-            event_type = getattr(event, "event", "")
+            raw_event_type = getattr(event, "event", "")
+            event_type = _normalize_event_type(raw_event_type)
 
-            # 思考/推理内容 (agno 内置推理引擎)
-            if event_type == RunEvent.reasoning_content_delta.value:
-                reasoning_buffer += getattr(event, "reasoning_content", "")
-                thinking_msg = render_thinking(reasoning_buffer)
-                yield history + [thinking_msg]
-
-            elif event_type == RunEvent.reasoning_completed.value:
+            # ---- SubAgent 名字徽章 ----
+            member = _extract_member_name(event)
+            if member and member != last_rendered_member and member != ctx.team.name:
                 if reasoning_buffer:
                     ctx.tracer.thinking(reasoning_buffer)
-                    thinking_msg = render_thinking(reasoning_buffer)
-                    history = history + [thinking_msg]
+                    history = history + [render_thinking(reasoning_buffer)]
+                    reasoning_buffer = ""
+                history = history + [render_member_badge(member)]
+                last_rendered_member = member
+                current_member = member
+                yield history
+
+            # ---- 思考/推理 ----
+            if event_type == "ReasoningContentDelta":
+                reasoning_buffer += getattr(event, "reasoning_content", "") or ""
+                yield history + [render_thinking(reasoning_buffer)]
+
+            elif event_type == "ReasoningCompleted":
+                if reasoning_buffer:
+                    ctx.tracer.thinking(reasoning_buffer)
+                    history = history + [render_thinking(reasoning_buffer)]
                     reasoning_buffer = ""
 
-            # 工具调用开始
-            elif event_type == RunEvent.tool_call_started.value:
-                # 如果有待提交的思考内容，先提交到历史
+            # ---- 工具调用开始 ----
+            elif event_type == "ToolCallStarted":
                 if reasoning_buffer:
                     ctx.tracer.thinking(reasoning_buffer)
                     history = history + [render_thinking(reasoning_buffer)]
                     reasoning_buffer = ""
                 tool = getattr(event, "tool", None)
                 if tool:
-                    tool_name = getattr(tool, "tool_name", "") or getattr(tool, "function_name", "unknown")
-                    tool_args = getattr(tool, "tool_args", None) or getattr(tool, "function_args", None)
+                    tool_name = (
+                        getattr(tool, "tool_name", "")
+                        or getattr(tool, "function_name", "unknown")
+                    )
+                    tool_args = (
+                        getattr(tool, "tool_args", None)
+                        or getattr(tool, "function_args", None)
+                    )
                     ctx.tracer.tool_invoke(tool_name, tool_args)
-                    tool_msg = render_tool_call(tool_name, inputs=tool_args)
-                    yield history + [tool_msg]
-                    current_tool = tool_name
+                    yield history + [
+                        render_tool_call(tool_name, inputs=tool_args, member=current_member)
+                    ]
 
-            # 工具调用完成
-            elif event_type == RunEvent.tool_call_completed.value:
+            # ---- 工具调用完成 ----
+            elif event_type == "ToolCallCompleted":
                 tool = getattr(event, "tool", None)
                 if tool:
-                    tool_name = getattr(tool, "tool_name", "") or getattr(tool, "function_name", current_tool or "unknown")
-                    tool_result = getattr(tool, "result", None) or getattr(event, "content", None)
+                    tool_name = (
+                        getattr(tool, "tool_name", "")
+                        or getattr(tool, "function_name", "unknown")
+                    )
+                    tool_result = getattr(tool, "result", None) or getattr(
+                        event, "content", None
+                    )
                     ctx.tracer.tool_result(tool_name, tool_result)
-                    tool_msg = render_tool_call(tool_name, outputs=tool_result)
-                    history = history + [tool_msg]
-                    current_tool = None
+                    history = history + [
+                        render_tool_call(tool_name, outputs=tool_result, member=current_member)
+                    ]
 
-            # 内容流（同时携带 reasoning_content 和 content）
-            elif event_type == RunEvent.run_content.value:
-                # 处理原生思考内容（Qwen/DeepSeek 等本地思考模型）
+            # ---- 内容流 ----
+            elif event_type == "RunContent":
+                # 本地原生思考内容 (Qwen/DeepSeek)
                 reasoning_delta = getattr(event, "reasoning_content", None)
                 if reasoning_delta:
                     reasoning_buffer += reasoning_delta
-                    thinking_msg = render_thinking(reasoning_buffer)
-                    yield history + [thinking_msg]
+                    yield history + [render_thinking(reasoning_buffer)]
 
-                # 当正式内容开始时，将思考内容固化到历史
                 content_delta = getattr(event, "content", None)
                 if content_delta is not None and reasoning_buffer:
                     ctx.tracer.thinking(reasoning_buffer)
                     history = history + [render_thinking(reasoning_buffer)]
                     reasoning_buffer = ""
 
-                if content_delta:
+                # 只有 Team leader (orchestrator) 的 content 才累积到最终回答
+                # member 的 content 已经在 tool_call 里体现
+                if content_delta and (
+                    current_member is None or current_member == ctx.team.name
+                ):
                     full_content += str(content_delta)
                     yield history + [render_response(full_content)]
 
-            # 运行完成
-            elif event_type == RunEvent.run_completed.value:
+            # ---- 运行完成 ----
+            elif event_type == "RunCompleted":
                 final = getattr(event, "content", None)
                 if final and str(final) != full_content:
                     full_content = str(final)
@@ -140,12 +182,13 @@ async def chat_handler(
         if full_content:
             history = history + [render_response(full_content)]
             ctx.tracer.response(full_content)
-            db.insert_message(ctx.db_session_id, "assistant", full_content) if ctx.db_session_id else None
+            if ctx.db_session_id:
+                db.insert_message(ctx.db_session_id, "assistant", full_content)
 
         yield history
 
     except Exception as e:
-        logger.exception("Agent 运行异常")
+        logger.exception("Team 运行异常")
         ctx.tracer.error(str(e))
         error_msg = f"⚠️ 抱歉，处理请求时出现错误：{str(e)}"
         history = history + [render_response(error_msg)]
@@ -154,11 +197,11 @@ async def chat_handler(
 
 _EXAMPLE_MESSAGES = [
     "直播套餐卖场走播用户，18:00-22:00 保障抖音直播",
-    "生成 CEI 配置",
-    "生成 Wifi 仿真配置",
-    "生成故障检测配置",
-    "生成远程闭环配置",
     "找出 CEI 分数较低的 PON 口并分析原因",
+    "查看当前 WIFI 覆盖",
+    "开通抖音应用切片",
+    "立即进行网关重启",
+    "用户卡顿，请定界",
 ]
 
 _CSS = """
@@ -185,16 +228,12 @@ _CSS = """
 
 
 async def _streaming_with_reenable(message, history, session_state):
-    """包装 chat_handler，在流式结束时同步恢复输入框和按钮。
-
-    直接在最后一次 yield 中返回 gr.update(interactive=True)，
-    避免使用 .then() 链式调用导致 gr.update dict 渗入 chatbot。
-    """
+    """包装 chat_handler，在流式结束时同步恢复输入框和按钮。"""
     last_history = history
     async for h in chat_handler(message, history, session_state):
         last_history = h
-        yield h, gr.update(), gr.update()   # 流式过程中不改变输入框/按钮状态
-    # 流结束后，在最后一次 yield 里恢复交互
+        yield h, gr.update(), gr.update()  # 流式过程中不改变输入框/按钮状态
+    # 流结束后恢复交互
     yield last_history, gr.update(interactive=True), gr.update(interactive=True)
 
 
@@ -202,7 +241,10 @@ def create_app() -> gr.Blocks:
     """创建 Gradio 应用。"""
     with gr.Blocks(title="家宽网络调优助手", css=_CSS) as app:
         gr.Markdown("# 🏠 家宽网络调优智能助手")
-        gr.Markdown("支持：综合目标设定 | 具体功能配置 | 数据洞察分析")
+        gr.Markdown(
+            "Team 架构：Orchestrator 路由 → PlanningAgent / InsightAgent / "
+            "ProvisioningAgent × 3"
+        )
 
         session_state = gr.State(value={"session_hash": str(uuid.uuid4())})
         pending_msg = gr.State("")
@@ -212,9 +254,8 @@ def create_app() -> gr.Blocks:
             buttons=["copy", "copy_all"],
         )
 
-        # 示例消息快捷按钮，分两行排列避免溢出
         gr.Markdown("**示例消息（点击发送）：**")
-        example_btns = []
+        example_btns: List[gr.Button] = []
         rows = [_EXAMPLE_MESSAGES[:3], _EXAMPLE_MESSAGES[3:]]
         for row_msgs in rows:
             with gr.Row():
@@ -244,7 +285,6 @@ def create_app() -> gr.Blocks:
                 gr.update(interactive=False),
             )
 
-        # 示例按钮：捕获按钮文本 → 流式（含末尾恢复）
         for btn in example_btns:
             btn.click(
                 fn=_capture_msg,
@@ -257,7 +297,6 @@ def create_app() -> gr.Blocks:
                 outputs=[chatbot, msg_input, send_btn],
             )
 
-        # 发送按钮
         send_btn.click(
             fn=_capture_msg,
             inputs=[msg_input],
@@ -269,7 +308,6 @@ def create_app() -> gr.Blocks:
             outputs=[chatbot, msg_input, send_btn],
         )
 
-        # 回车提交
         msg_input.submit(
             fn=_capture_msg,
             inputs=[msg_input],

@@ -1,0 +1,17 @@
+{
+  "remote_optimization": {
+    "trigger": {
+      "mode": "{{ trigger_mode }}",
+      "time_window": "{{ time_window }}"
+    },
+    "action": {
+      "type": "{{ action }}",
+      "coverage_weak_enabled": {{ coverage_weak_enabled | lower }}
+    },
+    "execution_policy": {
+      "max_attempts": 2,
+      "timeout_minutes": 15,
+      "require_confirmation": false
+    }
+  }
+}
