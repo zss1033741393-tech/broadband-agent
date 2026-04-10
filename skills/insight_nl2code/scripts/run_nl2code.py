@@ -44,7 +44,7 @@ except ImportError as exc:
         "skill": "insight_nl2code",
         "op": "run_nl2code",
         "error": f"ce_insight_core 未安装: {exc}",
-    }, ensure_ascii=False))
+    }, ensure_ascii=True))
     sys.exit(1)
 
 
@@ -156,7 +156,7 @@ def run(payload_json: str) -> str:
         "data_shape": list(df.shape),
         "code": code,
     }
-    return json.dumps(output, ensure_ascii=False, default=_json_default)
+    return json.dumps(output, ensure_ascii=True, default=_json_default)
 
 
 def _build_description(serialized: dict[str, Any], code_prompt: str) -> str:
@@ -181,7 +181,7 @@ def _err(msg: str, code: str = "") -> str:
         "op": "run_nl2code",
         "error": msg,
         "code": code,
-    }, ensure_ascii=False)
+    }, ensure_ascii=True)
 
 
 def _json_default(obj: Any) -> Any:
@@ -198,7 +198,4 @@ def _json_default(obj: Any) -> Any:
 
 if __name__ == "__main__":
     _payload = sys.argv[1] if len(sys.argv) > 1 else "{}"
-    output = run(_payload)
-    sys.stdout.buffer.write(output.encode("utf-8"))
-    sys.stdout.buffer.write(b"\n")
-    sys.stdout.buffer.flush()
+    print(run(_payload))
