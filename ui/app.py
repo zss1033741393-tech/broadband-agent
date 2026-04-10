@@ -235,11 +235,16 @@ async def chat_handler(
                 if content_delta is not None and reasoning_buffer and source_id == reasoning_source:
                     history = _flush_reasoning(history)
 
-                # 只有 Team leader (Orchestrator) 的 content 累积到最终回答;
-                # member 的 content 通过 tool_call 体现, 不重复累积。
+                # Team leader (Orchestrator) 的 content 累积到最终回答;
+                # member (如 InsightAgent) 的 content 也透传给前端,
+                # 供前端解析 <!--event:xxx--> 标记做阶段渲染。
                 if content_delta and is_leader:
                     full_content += str(content_delta)
                     yield history + [render_response(full_content)]
+                elif content_delta and not is_leader:
+                    # member 的 content 单独渲染（不混入 leader 的 full_content）
+                    history = history + [render_response(str(content_delta))]
+                    yield history
 
             # ---- 运行完成 ----
             elif event_type == "RunCompleted":
