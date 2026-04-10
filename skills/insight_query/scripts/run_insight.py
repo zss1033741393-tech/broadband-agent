@@ -45,7 +45,7 @@ except ImportError as exc:
         "skill": "insight_query",
         "op": "run_insight",
         "error": f"ce_insight_core 未安装: {exc}",
-    }, ensure_ascii=False))
+    }, ensure_ascii=True))
     sys.exit(1)
 
 _MAX_RECORDS = 15
@@ -207,7 +207,7 @@ def run(payload_json: str) -> str:
         "value_columns_used": value_columns,
         "group_column_used": group_column,
     }
-    return json.dumps(output, ensure_ascii=False, default=_json_default)
+    return json.dumps(output, ensure_ascii=True, default=_json_default)
 
 
 def _resolve_columns(df: Any, cols: list[str]) -> list[str]:
@@ -244,7 +244,7 @@ def _err(msg: str) -> str:
         "skill": "insight_query",
         "op": "run_insight",
         "error": msg,
-    }, ensure_ascii=False)
+    }, ensure_ascii=True)
 
 
 def _json_default(obj: Any) -> Any:
@@ -261,7 +261,4 @@ def _json_default(obj: Any) -> Any:
 
 if __name__ == "__main__":
     _payload = sys.argv[1] if len(sys.argv) > 1 else "{}"
-    output = run(_payload)
-    sys.stdout.buffer.write(output.encode("utf-8"))
-    sys.stdout.buffer.write(b"\n")
-    sys.stdout.buffer.flush()
+    print(run(_payload))
