@@ -417,24 +417,174 @@ def test_differentiated_delivery_render():
     assert "slice_id" in result["dispatch_result"]
 
 
-def test_data_insight_query_stage():
-    mod = _load_script("data_insight", "mock_query.py")
-    result = json.loads(mod.query("query"))
+def test_ce_insight_core_importable():
+    """vendor/ce_insight_core wheel 已安装且公共 API 可导入。"""
+    import ce_insight_core as cic
+
+    assert hasattr(cic, "query_subject_pandas")
+    assert hasattr(cic, "run_insight")
+    assert hasattr(cic, "fix_query_config")
+    assert hasattr(cic, "run_nl2code")
+    assert hasattr(cic, "get_pruned_schema")
+    assert hasattr(cic, "get_minute_schema")
+    assert hasattr(cic, "NL2CodeError")
+
+    # 12 种洞察函数全部注册
+    types = cic.list_insight_types()
+    assert len(types) == 12
+    for t in (
+        "Attribution", "Trend", "ChangePoint", "Seasonality",
+        "OutlierDetection", "Clustering", "Correlation",
+        "CrossMeasureCorrelation", "Evenness",
+        "OutstandingMax", "OutstandingMin", "OutstandingTop2",
+    ):
+        assert t in types
+
+
+def test_data_insight_list_schema_day():
+    mod = _load_script("data_insight", "list_schema.py")
+    result = json.loads(mod.run(json.dumps({"table": "day", "focus_dimensions": ["ODN"]})))
+    assert result["status"] == "ok"
     assert result["skill"] == "data_insight"
-    assert result["stage"] == "query"
-    assert "data" in result
-    assert "echarts_option" in result
-    assert result["echarts_option"]["series"][0]["type"] == "bar"
-    assert "summary" in result
-    assert "priority_pons" in result["summary"]
+    assert result["op"] == "list_schema"
+    assert result["table"] == "day"
+    assert isinstance(result["schema_markdown"], str)
+    assert len(result["schema_markdown"]) > 100
+    assert isinstance(result["all_fields"], list)
+    assert len(result["all_fields"]) > 10
 
 
-def test_data_insight_attribution_stage():
-    mod = _load_script("data_insight", "mock_query.py")
-    result = json.loads(mod.query("attribution"))
-    assert result["stage"] == "attribution"
-    assert "analysis" in result
-    assert result["echarts_option"]["series"][0]["type"] == "radar"
+def test_data_insight_list_schema_minute():
+    mod = _load_script("data_insight", "list_schema.py")
+    result = json.loads(mod.run(json.dumps({"table": "minute", "focus_dimensions": []})))
+    assert result["status"] == "ok"
+    assert result["table"] == "minute"
+    assert len(result["schema_markdown"]) > 100
+
+
+def test_data_insight_run_query_triple():
+    mod = _load_script("data_insight", "run_query.py")
+    result = json.loads(mod.run(json.dumps({
+        "query_config": {
+            "dimensions": [[]],
+            "breakdown": {"name": "portUuid", "type": "UNORDERED"},
+            "measures": [{"name": "CEI_score", "aggr": "AVG"}],
+        },
+        "table_level": "day",
+    })))
+    assert result["status"] == "ok"
+    assert result["skill"] == "data_insight"
+    assert result["op"] == "run_query"
+    assert result["data_shape"][0] > 0
+    assert "portUuid" in result["columns"]
+    assert isinstance(result["records"], list)
+    assert len(result["records"]) > 0
+
+
+def test_data_insight_run_insight_outstanding_min():
+    mod = _load_script("data_insight", "run_insight.py")
+    result = json.loads(mod.run(json.dumps({
+        "insight_type": "OutstandingMin",
+        "query_config": {
+            "dimensions": [[]],
+            "breakdown": {"name": "portUuid", "type": "UNORDERED"},
+            "measures": [{"name": "CEI_score", "aggr": "AVG"}],
+        },
+        "table_level": "day",
+    })))
+    assert result["status"] == "ok"
+    assert result["op"] == "run_insight"
+    assert result["insight_type"] == "OutstandingMin"
+    assert 0.0 <= result["significance"] <= 1.0
+    assert isinstance(result["filter_data"], list)
+    assert result["chart_configs"]  # 非空
+    # found_entities 应包含 portUuid 的前 N 个值
+    assert "portUuid" in result["found_entities"]
+    assert len(result["found_entities"]["portUuid"]) > 0
+
+
+def test_data_insight_run_insight_trend():
+    mod = _load_script("data_insight", "run_insight.py")
+    result = json.loads(mod.run(json.dumps({
+        "insight_type": "Trend",
+        "query_config": {
+            "dimensions": [[]],
+            "breakdown": {"name": "date", "type": "ORDERED"},
+            "measures": [{"name": "CEI_score", "aggr": "AVG"}],
+        },
+        "table_level": "day",
+    })))
+    assert result["status"] == "ok"
+    assert result["insight_type"] == "Trend"
+    # Trend 的 description 是 dict，含 direction / slope / r_squared / summary
+    desc = result["description"]
+    if isinstance(desc, dict):
+        assert "direction" in desc or "summary" in desc
+
+
+def test_data_insight_run_nl2code_safe():
+    mod = _load_script("data_insight", "run_nl2code.py")
+    result = json.loads(mod.run(json.dumps({
+        "code": "result = df.nsmallest(3, 'CEI_score')[['portUuid', 'CEI_score']]",
+        "query_config": {
+            "dimensions": [[]],
+            "breakdown": {"name": "portUuid", "type": "UNORDERED"},
+            "measures": [{"name": "CEI_score", "aggr": "AVG"}],
+        },
+        "table_level": "day",
+        "code_prompt": "取 CEI 最低的前 3 个 PON 口",
+    })))
+    assert result["status"] == "ok"
+    assert result["op"] == "run_nl2code"
+    assert result["result"]["type"] == "dataframe"
+    assert result["result"]["shape"] == [3, 2]
+
+
+def test_data_insight_run_nl2code_blocks_import():
+    """沙箱必须阻止 import 语句。"""
+    mod = _load_script("data_insight", "run_nl2code.py")
+    result = json.loads(mod.run(json.dumps({
+        "code": "import os\nresult = os.listdir('.')",
+        "query_config": {
+            "dimensions": [[]],
+            "breakdown": {"name": "portUuid", "type": "UNORDERED"},
+            "measures": [{"name": "CEI_score", "aggr": "AVG"}],
+        },
+        "table_level": "day",
+    })))
+    assert result["status"] == "error"
+    assert "import" in result["error"]
+
+
+def test_data_insight_run_nl2code_blocks_open():
+    """沙箱必须阻止 open 调用。"""
+    mod = _load_script("data_insight", "run_nl2code.py")
+    result = json.loads(mod.run(json.dumps({
+        "code": "result = open('/etc/passwd').read()",
+        "query_config": {
+            "dimensions": [[]],
+            "breakdown": {"name": "portUuid", "type": "UNORDERED"},
+            "measures": [{"name": "CEI_score", "aggr": "AVG"}],
+        },
+        "table_level": "day",
+    })))
+    assert result["status"] == "error"
+    assert "open" in result["error"].lower() or "禁止" in result["error"]
+
+
+def test_data_insight_run_nl2code_blocks_dunder():
+    """沙箱必须阻止访问魔术属性（逃逸尝试）。"""
+    mod = _load_script("data_insight", "run_nl2code.py")
+    result = json.loads(mod.run(json.dumps({
+        "code": "result = [].__class__.__bases__[0].__subclasses__()",
+        "query_config": {
+            "dimensions": [[]],
+            "breakdown": {"name": "portUuid", "type": "UNORDERED"},
+            "measures": [{"name": "CEI_score", "aggr": "AVG"}],
+        },
+        "table_level": "day",
+    })))
+    assert result["status"] == "error"
 
 
 def test_wifi_simulation_four_steps():
@@ -454,7 +604,8 @@ def test_wifi_simulation_four_steps():
         assert step["status"] == "success"
 
 
-def test_report_rendering():
+def test_report_rendering_legacy_analysis_form():
+    """旧归因形态（含 analysis 键）必须仍然走 report.md.j2 渲染。"""
     mod = _load_script("report_rendering", "render_report.py")
     ctx = json.dumps(
         {
@@ -479,6 +630,53 @@ def test_report_rendering():
     assert "测试报告" in md
     assert "PON-2/0/5" in md
     assert "带宽利用率过高" in md
+
+
+def test_report_rendering_multi_phase_form():
+    """多阶段形态（含 phases 键）必须走 multi_phase_report.md.j2 渲染。"""
+    mod = _load_script("report_rendering", "render_report.py")
+    ctx = json.dumps(
+        {
+            "title": "多阶段洞察报告",
+            "goal": "分析 PON 口 CEI 质量问题",
+            "summary": {
+                "priority_pons": ["port_4"],
+                "priority_gateways": [],
+                "distinct_issues": ["ODN 光功率异常"],
+                "scope_indicator": "multi_pon",
+                "peak_time_window": "19:00-22:00",
+                "has_complaints": True,
+                "remote_loop_candidates": ["port_4"],
+                "root_cause_fields": ["oltRxPowerHighCnt"],
+            },
+            "phases": [
+                {
+                    "phase_id": 1,
+                    "name": "定位低分 PON 口",
+                    "milestone": "找出 CEI 最低的 PON 口",
+                    "table_level": "day",
+                    "steps": [
+                        {
+                            "step_id": 1,
+                            "insight_type": "OutstandingMin",
+                            "significance": 0.73,
+                            "description": {"summary": "CEI_score 最小出现在 port_4"},
+                            "rationale": "定位低分设备",
+                            "found_entities": {"portUuid": ["port_4"]},
+                        }
+                    ],
+                    "reflection": {"choice": "A", "reason": "符合预期"},
+                }
+            ],
+        }
+    )
+    md = mod.render(ctx)
+    assert "多阶段洞察报告" in md
+    assert "Phase 1" in md
+    assert "OutstandingMin" in md
+    assert "port_4" in md
+    assert "oltRxPowerHighCnt" in md
+    assert "ODN 光功率异常" in md
 
 
 # ============================================================================
