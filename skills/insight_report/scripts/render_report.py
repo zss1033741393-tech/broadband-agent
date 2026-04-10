@@ -91,6 +91,9 @@ def _pick_template(ctx: Dict[str, Any]) -> str:
 
 if __name__ == "__main__":
     if len(sys.argv) > 1:
-        print(render(sys.argv[1]))
+        output = render(sys.argv[1])
     else:
-        print(render("{}"))
+        output = render("{}")
+    sys.stdout.buffer.write(output.encode("utf-8"))
+    sys.stdout.buffer.write(b"\n")
+    sys.stdout.buffer.flush()
