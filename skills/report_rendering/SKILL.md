@@ -1,32 +1,72 @@
 ---
 name: report_rendering
-description: "报告渲染：将 InsightAgent 的查询+归因结果渲染为结构化 Markdown 分析报告"
+description: "报告渲染：把 InsightAgent 的执行产物（多阶段或归因形态）渲染为结构化 Markdown 报告"
 ---
 
 # 报告渲染
 
 ## Metadata
 - **paradigm**: Generator (纯模板填空)
-- **when_to_use**: InsightAgent 完成阶段 2-3 的数据查询和归因后，需要输出 Markdown 汇总报告
-- **inputs**: 上下文 JSON（`{title, summary, analysis, echarts_option?}`）
+- **when_to_use**: InsightAgent 完成所有 Phase 执行后，需要汇总 Markdown 报告
+- **inputs**: 上下文 JSON — 两种形态自动识别
 - **outputs**: 结构化 Markdown 报告（stdout 即最终产物，原样输出）
 
 ## 使用范围
 
-- ✅ InsightAgent 阶段 4 — 洞察报告生成
-- ❌ Provisioning 执行报告（Provisioning 直接透传 Skill stdout，不需要本 Skill 统一渲染）
-- ❌ 综合目标方案报告（方案由 Orchestrator 汇总派发结果，不经过本 Skill）
+- ✅ InsightAgent 阶段 5 — 多阶段洞察报告生成（新形态）
+- ✅ InsightAgent 归因形态报告（旧形态，向后兼容）
+- ❌ Provisioning 执行报告（Provisioning 直接透传 Skill stdout，不经过本 Skill）
+- ❌ 综合目标方案报告（方案由 Orchestrator 汇总派发结果）
+
+## 两种上下文形态
+
+脚本自动根据 context JSON 的键选择模板：
+
+### A. 多阶段形态（新，优先匹配）— 含 `phases` 键
+```json
+{
+  "title": "网络质量数据洞察报告",
+  "goal": "...",
+  "summary": { ... summary JSON（见 prompts/insight.md §8） ... },
+  "phases": [
+    {
+      "phase_id": 1,
+      "name": "...",
+      "milestone": "...",
+      "table_level": "day",
+      "focus_dimensions": [],
+      "steps": [
+        {
+          "step_id": 1,
+          "insight_type": "OutstandingMin",
+          "significance": 0.73,
+          "description": "...",
+          "rationale": "...",
+          "found_entities": {"portUuid": ["..."]},
+          "fix_warnings": []
+        }
+      ],
+      "reflection": {"choice": "A", "reason": "..."}
+    }
+  ],
+  "conclusion": "..."
+}
+```
+→ 使用 `references/multi_phase_report.md.j2`
+
+### B. 归因形态（旧，向后兼容）— 含 `analysis` 键
+```json
+{
+  "title": "...",
+  "summary": {...},
+  "analysis": [{"pon_port": "...", "issues": [...], ...}]
+}
+```
+→ 使用 `references/report.md.j2`
 
 ## How to Use
 
-1. 构建上下文 JSON：
-   ```json
-   {
-     "title": "网络质量数据洞察报告",
-     "summary": { ... 来自 data_insight 的 summary 块 ... },
-     "analysis": [ ... 来自 data_insight attribution 阶段的 analysis ... ]
-   }
-   ```
+1. 按上下文形态构建 JSON
 2. 调用脚本：
    ```
    get_skill_script(
@@ -36,16 +76,17 @@ description: "报告渲染：将 InsightAgent 的查询+归因结果渲染为结
        args=["<context_json_string>"]
    )
    ```
-3. 脚本读取 `references/report.md.j2` 渲染 Markdown，**stdout 即最终报告**
+3. 脚本根据 `phases` 键是否存在选模板渲染，**stdout 即最终报告**
 4. Agent **必须原样输出 stdout**，不得二次改写
 
 ## Scripts
 
-- `scripts/render_report.py` — Jinja2 渲染脚本
+- `scripts/render_report.py` — Jinja2 渲染脚本（自动识别上下文形态 → 选模板）
 
 ## References
 
-- `references/report.md.j2` — 洞察报告 Jinja2 模板
+- `references/report.md.j2` — 归因形态模板（旧，按 PON 口列分析段）
+- `references/multi_phase_report.md.j2` — 多阶段形态模板（新，按 Phase → Step 结构渲染）
 
 ## Examples
 

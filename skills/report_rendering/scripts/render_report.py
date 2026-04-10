@@ -1,7 +1,11 @@
 #!/usr/bin/env python3
-"""报告渲染脚本 — 将 InsightAgent 的查询/归因结果渲染为 Markdown 报告。
+"""报告渲染脚本 — 将 InsightAgent 的执行产物渲染为 Markdown 报告。
 
 作为 agno Skill 脚本被调用。stdout 即最终产物，Agent 必须原样输出。
+
+自动识别两种上下文形态：
+- **多阶段形态**（新）：含 `phases` 键 → 使用 `multi_phase_report.md.j2`
+- **归因形态**（旧）：含 `analysis` 键 → 使用 `report.md.j2`（向后兼容）
 """
 
 import json
@@ -19,11 +23,7 @@ def render(context_json: str) -> str:
     """渲染 Markdown 报告。
 
     Args:
-        context_json: 上下文 JSON 字符串，支持字段：
-            - title: 报告标题（可选）
-            - timestamp: 生成时间（可选，自动填充）
-            - summary: 数据洞察摘要 dict
-            - analysis: 分 PON 归因分析列表
+        context_json: 上下文 JSON 字符串，支持两种形态（见模块 docstring）。
     """
     try:
         ctx: Dict[str, Any] = (
@@ -38,11 +38,21 @@ def render(context_json: str) -> str:
         loader=FileSystemLoader(str(_REFERENCES_DIR)),
         keep_trailing_newline=True,
     )
+
+    template_name = _pick_template(ctx)
+
     try:
-        tmpl = env.get_template("report.md.j2")
+        tmpl = env.get_template(template_name)
         return tmpl.render(**ctx)
     except Exception as exc:
         return f"渲染失败: {exc}"
+
+
+def _pick_template(ctx: Dict[str, Any]) -> str:
+    """选择模板。phases 优先（新多阶段），否则回退 report.md.j2（旧归因）。"""
+    if ctx.get("phases"):
+        return "multi_phase_report.md.j2"
+    return "report.md.j2"
 
 
 if __name__ == "__main__":
@@ -51,25 +61,42 @@ if __name__ == "__main__":
     else:
         sample = json.dumps(
             {
-                "title": "网络质量数据洞察报告（示例）",
+                "title": "网络质量数据洞察报告（示例 · 多阶段）",
+                "goal": "找出 CEI 分数较低的 PON 口并分析原因",
                 "summary": {
-                    "priority_pons": ["PON-2/0/5"],
-                    "watch_pons": ["PON-1/0/1"],
-                    "distinct_issues": ["带宽利用率过高", "丢包率超标"],
-                    "scope_indicator": "regional",
+                    "priority_pons": ["port_4", "port_5"],
+                    "priority_gateways": [],
+                    "distinct_issues": ["ODN 光功率异常"],
+                    "scope_indicator": "multi_pon",
                     "peak_time_window": "19:00-22:00",
-                    "total_complaints_7d": 12,
-                    "remote_loop_candidates": ["PON-2/0/5"],
+                    "has_complaints": True,
+                    "remote_loop_candidates": ["port_4"],
+                    "root_cause_fields": ["oltRxPowerHighCnt"],
                 },
-                "analysis": [
+                "phases": [
                     {
-                        "pon_port": "PON-2/0/5",
-                        "cei_score": 48.9,
-                        "issues": ["带宽利用率过高", "丢包率超标"],
-                        "probable_causes": ["用户数 60 较多，带宽竞争激烈"],
-                        "recommendation": "建议优先关注",
+                        "phase_id": 1,
+                        "name": "定位低分 PON 口",
+                        "milestone": "找出 CEI 最低的 PON 口",
+                        "table_level": "day",
+                        "steps": [
+                            {
+                                "step_id": 1,
+                                "insight_type": "OutstandingMin",
+                                "significance": 0.73,
+                                "description": {"summary": "CEI_score 最小出现在 port_4"},
+                                "rationale": "定位低分设备",
+                                "found_entities": {"portUuid": ["port_4", "port_5"]},
+                                "fix_warnings": [],
+                            }
+                        ],
+                        "reflection": {
+                            "choice": "A",
+                            "reason": "符合预期，继续下一阶段",
+                        },
                     }
                 ],
+                "conclusion": "主要问题集中在 ODN 光功率。",
             },
             ensure_ascii=False,
         )
