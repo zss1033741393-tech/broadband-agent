@@ -99,6 +99,30 @@
 如果前序 Phase 产出了 `found_entities`（如 `portUuid: [...]`），本 Phase 的步骤应用
 `IN` 过滤这些真实值而不是 `dimensions: [[]]`。参见 `decompose_fewshots.md` 的"下钻实体使用"节。
 
+🔴 **dimensions 过滤格式强制要求**：
+
+**正确格式**（必须严格遵循）：
+```json
+"dimensions": [[{
+  "dimension": {"name": "portUuid", "type": "DISCRETE"},
+  "conditions": [{"oper": "IN", "values": ["uuid-a", "uuid-b", "uuid-c"]}]
+}]]
+```
+
+**错误格式**（严禁使用，会被 fix_query_config 清除为 `[[]]` 导致过滤失效）：
+```json
+"dimensions": [["portUuid", "IN", ["uuid-a", "uuid-b"]]]
+"dimensions": [{"name": "portUuid", "oper": "IN", "values": [...]}]
+```
+
+多条件筛选示例（同时过滤 portUuid 和 gatewayMac）：
+```json
+"dimensions": [[
+  {"dimension": {"name": "portUuid", "type": "DISCRETE"}, "conditions": [{"oper": "IN", "values": ["uuid-a"]}]},
+  {"dimension": {"name": "gatewayMac", "type": "DISCRETE"}, "conditions": [{"oper": "IN", "values": ["mac-1"]}]}
+]]
+```
+
 ### 禁止
 - 不用 placeholder / 占位符；不知道真实值时 `dimensions: [[]]`
 - `conditions` 数组中每项必须有 `oper` + 非空 `values`
@@ -107,6 +131,19 @@
 ---
 
 ## 5. 阶段 3 — Execute
+
+### 下钻过滤：构造 payload 时的 dimensions 格式
+
+当需要基于 Phase 1 发现的 `found_entities` 做下钻查询时，payload 中的 `query_config.dimensions` **必须** 使用标准三元组格式。
+
+**完整的带 IN 过滤的 run_insight 调用示例**：
+```
+get_skill_script("data_insight", "run_insight.py", execute=True, args=[
+  '{"insight_type":"OutstandingMin","query_config":{"dimensions":[[{"dimension":{"name":"portUuid","type":"DISCRETE"},"conditions":[{"oper":"IN","values":["uuid-a","uuid-b","uuid-c"]}]}]],"breakdown":{"name":"portUuid","type":"UNORDERED"},"measures":[{"name":"ODN_score","aggr":"AVG"},{"name":"Wifi_score","aggr":"AVG"}]},"table_level":"day"}'
+])
+```
+
+🔴 **切记**：`dimensions` 格式错误是最常见的导致下钻失效的原因。如果你看到返回的 `data_shape` 行数跟全量数据一样多（如 3857 行），说明过滤没有生效，请检查 dimensions 格式。
 
 ### 每步的调用模式
 
@@ -231,6 +268,8 @@ payload 的 `query_config` 就是 Step 里的三元组，`insight_type` 是 Step
    ```
 
 3. **必须**原样输出 stdout 作为最终报告，**禁止**二次改写、摘要或重排版
+
+4. **兜底**：如果 `report_rendering` 调用失败（如 args 类型校验错误），**直接在 assistant 消息中用 Markdown 格式输出报告**，包含：各 Phase 的步骤结果表格、关键发现、结构化交接契约 JSON。不要因为渲染失败就丢弃分析结果
 
 ---
 
