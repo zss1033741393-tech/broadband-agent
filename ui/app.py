@@ -1,5 +1,6 @@
 """Gradio Web UI 入口 — 单用户多会话，驱动 agno Team。"""
 
+import json
 import sys
 import uuid
 from pathlib import Path
@@ -219,7 +220,6 @@ async def chat_handler(
                         event, "content", None
                     )
                     ctx.tracer.tool_result(tool_name, tool_result, agent=agent, is_leader=is_leader)
-                    # 同时写入 tool_calls 表（区别于 traces 表）
                     if ctx.db_session_id:
                         db.insert_tool_call(
                             ctx.db_session_id,
@@ -228,6 +228,33 @@ async def chat_handler(
                             outputs_json=str(tool_result)[:4000] if tool_result else "",
                             status="ok",
                         )
+                    # delegate_task_to_member 去重: 如果 member content 已通过
+                    # RunContent 展示, 则只显示摘要, 避免重复输出完整内容
+                    _is_delegation = tool_name in (
+                        "delegate_task_to_member",
+                        "adelegate_task_to_member",
+                        "delegate_task_to_members",
+                    )
+                    if _is_delegation:
+                        # 从 tool_args 中提取 member_id
+                        _member_id = ""
+                        if isinstance(tool_args, dict):
+                            _member_id = tool_args.get("member_id", "")
+                        elif isinstance(tool_args, str):
+                            try:
+                                _member_id = json.loads(tool_args).get("member_id", "")
+                            except (json.JSONDecodeError, TypeError, AttributeError):
+                                pass
+                        # 如果该 member 已有 content 展示, 仅显示 "委派完成" 摘要
+                        if _member_id and _member_id in seen_members:
+                            _result_len = len(str(tool_result)) if tool_result else 0
+                            history = history + render_tool_call(
+                                tool_name,
+                                inputs=tool_args,
+                                outputs=f"✅ {_member_id} 已完成 (返回 {_result_len} 字符，内容见上方 SubAgent 回复)",
+                                member=None,
+                            )
+                            continue
                     tool_label_source = source_id if not is_leader else None
                     history = history + render_tool_call(
                         tool_name,

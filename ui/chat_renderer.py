@@ -4,6 +4,7 @@
 """
 
 import json
+import re
 from typing import Any, Dict, List, Optional
 
 
@@ -16,6 +17,9 @@ _AGENT_DISPLAY_NAMES = {
     "provisioning_delivery": "ProvisioningAgent (差异化承载)",
     "provisioning_cei_chain": "ProvisioningAgent (体验保障链)",
 }
+
+# InsightAgent 输出协议标记正则 — 仅匹配标记头
+_EVENT_MARKER_HEAD_RE = re.compile(r"<!--event:(\w+)-->\s*\n?")
 
 
 def _display_agent(name: str) -> str:
@@ -139,8 +143,119 @@ def render_tool_call(
     return messages
 
 
+def _render_event_plan(data: dict) -> str:
+    """将 <!--event:plan--> JSON 渲染为 Markdown 表格。"""
+    goal = data.get("goal", "")
+    phases = data.get("phases", [])
+    if not phases:
+        return ""
+    rows = ["| 阶段 | 层级 | 目标 | 数据粒度 |", "|------|------|------|----------|"]
+    for p in phases:
+        pid = p.get("phase_id", "?")
+        name = p.get("name", "")
+        milestone = p.get("milestone", "")
+        table_level = p.get("table_level", "")
+        rows.append(f"| **Phase {pid}** | {name} | {milestone} | {table_level} |")
+    return f"**📊 分析规划** — {goal}\n\n" + "\n".join(rows)
+
+
+def _render_event_phase_start(data: dict) -> str:
+    """将 <!--event:phase_start--> JSON 渲染为状态行。"""
+    pid = data.get("phase_id", "?")
+    name = data.get("name", "")
+    status = data.get("status", "running")
+    icon = "▶️" if status == "running" else "✅"
+    return f"{icon} **Phase {pid}**: {name}"
+
+
+def _render_event_step_result(data: dict) -> str:
+    """将 <!--event:step_result--> JSON 渲染为结果摘要。"""
+    pid = data.get("phase_id", "?")
+    sid = data.get("step_id", "?")
+    insight_type = data.get("insight_type", "")
+    summary = data.get("summary", "")
+    sig = data.get("significance", "")
+    sig_str = f" (significance={sig})" if sig else ""
+    return f"  📌 P{pid}-S{sid} `{insight_type}`{sig_str}: {summary}"
+
+
+def _render_event_reflect(data: dict) -> str:
+    """将 <!--event:reflect--> JSON 渲染为反思决策。"""
+    pid = data.get("phase_id", "?")
+    choice = data.get("choice", "?")
+    reason = data.get("reason", "")
+    return f"  🔄 Phase {pid} 反思: **{choice}** — {reason}"
+
+
+def _render_event_done(_data: dict) -> str:
+    return "✅ 洞察分析完成"
+
+
+# 事件类型 → 渲染函数映射
+_EVENT_RENDERERS = {
+    "plan": _render_event_plan,
+    "phase_start": _render_event_phase_start,
+    "step_result": _render_event_step_result,
+    "reflect": _render_event_reflect,
+    "done": _render_event_done,
+}
+
+
+def _parse_member_content(raw: str) -> str:
+    """解析 InsightAgent 协议标记，将 <!--event:xxx-->+JSON 替换为结构化 Markdown。
+
+    使用 json.JSONDecoder.raw_decode 精确定位 JSON 边界，
+    支持任意深度嵌套的 JSON 对象。普通 Markdown 文本保持原样。
+    """
+    decoder = json.JSONDecoder()
+    parts: list[str] = []
+    pos = 0
+
+    for m in _EVENT_MARKER_HEAD_RE.finditer(raw):
+        # 保留标记之前的普通文本
+        before = raw[pos:m.start()]
+        if before.strip():
+            parts.append(before)
+
+        event_type = m.group(1)
+        json_start = m.end()
+
+        # 跳过标记后的空白，找到 JSON 对象起始
+        json_scan = json_start
+        while json_scan < len(raw) and raw[json_scan] in " \t\n\r":
+            json_scan += 1
+
+        rendered = ""
+        json_end = json_scan
+        if json_scan < len(raw) and raw[json_scan] == "{":
+            try:
+                data, end_idx = decoder.raw_decode(raw, json_scan)
+                json_end = end_idx  # raw_decode 返回的是绝对位置
+                renderer = _EVENT_RENDERERS.get(event_type)
+                if renderer:
+                    rendered = renderer(data)
+            except (json.JSONDecodeError, TypeError):
+                pass  # JSON 解析失败，跳过该标记
+
+        if rendered:
+            parts.append(rendered)
+        pos = json_end
+
+    # 追加剩余文本
+    tail = raw[pos:]
+    if tail.strip():
+        parts.append(tail)
+
+    result = "\n\n".join(parts)
+    result = re.sub(r"\n{3,}", "\n\n", result).strip()
+    return result
+
+
 def render_member_content(content: str, member: Optional[str] = None) -> Dict[str, Any]:
-    """渲染 SubAgent 的文本回复内容（折叠块）。
+    """渲染 SubAgent 的文本回复内容。
+
+    自动识别 InsightAgent 的 <!--event:xxx--> 协议标记并结构化渲染。
+    普通 Markdown 内容保持原样。
 
     Args:
         content: SubAgent 生成的文本内容
@@ -149,10 +264,16 @@ def render_member_content(content: str, member: Optional[str] = None) -> Dict[st
     title = "📝 SubAgent 回复"
     if member:
         title = f"📝 [{_display_agent(member)}] 回复"
+
+    # 解析协议标记
+    rendered = _parse_member_content(content)
+    if not rendered:
+        rendered = "(处理中...)"
+
     return {
         "role": "assistant",
         "metadata": {"title": title},
-        "content": content,
+        "content": rendered,
     }
 
 
