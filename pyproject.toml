@@ -14,6 +14,7 @@ dependencies = [
     "openai>=1.0.0",
     # ── Web UI ──
     "gradio>=4.0.0",
+    "httptools>=0.6",               # uvicorn (Gradio 内部) 在 Windows 上需要兼容版本
     # ── 基础设施 ──
     "loguru>=0.7.0",
     "pyyaml>=6.0",
