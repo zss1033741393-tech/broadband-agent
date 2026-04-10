@@ -71,6 +71,12 @@ instance/
 # Sphinx documentation
 docs/_build/
 
+# Project docs (design documents, not for version control)
+docs/
+
+# Runtime data (SQLite, logs)
+data/
+
 # PyBuilder
 .pybuilder/
 target/
@@ -94,11 +100,8 @@ ipython_config.py
 #   install all needed dependencies.
 #Pipfile.lock
 
-# UV
-#   Similar to Pipfile.lock, it is generally recommended to include uv.lock in version control.
-#   This is especially recommended for binary packages to ensure reproducibility, and is more
-#   commonly ignored for libraries.
-#uv.lock
+# UV — 应用项目锁定 uv.lock 以保证可复现性
+# uv.lock 和 .python-version 均**纳入**版本控制（不在此处忽略）
 
 # poetry
 #   Similar to Pipfile.lock, it is generally recommended to include poetry.lock in version control.
@@ -205,3 +208,19 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# Fae POC 真实凭证与内部模块 — 永不提交
+fae_poc/config.ini
+fae_poc/NCELogin.py
+
+# 本地工作目录 — 存放 ce-insight-2.0 upstream clone 等参考源码,不纳入版本控制
+tmp/
+
+# vendor 子包 editable install 产物 — pip install -e / uv sync 生成
+# (*.egg-info/ 已被上方全局规则覆盖,此处显式列出 vendor 特有路径防止遗漏)
+vendor/*/build/
+vendor/*/src/*.egg-info/
+vendor/*/*.egg-info/
+
+# uv 工作区产物 (如有 uv workspace 文件)
+*.uvworkspace
