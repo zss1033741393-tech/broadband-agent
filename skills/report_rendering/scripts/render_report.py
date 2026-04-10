@@ -90,6 +90,8 @@ def _pick_template(ctx: Dict[str, Any]) -> str:
 
 
 if __name__ == "__main__":
+    if sys.platform == "win32":
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     if len(sys.argv) > 1:
         print(render(sys.argv[1]))
     else:
