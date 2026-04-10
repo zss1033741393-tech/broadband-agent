@@ -115,8 +115,6 @@ async def chat_handler(
     current_member: Optional[str] = None        # 最近一次 member 事件的 source_id (非 leader)
     # 本轮已渲染过徽章的 member 集合 — 每个 SubAgent 只展示一次入场标记。
     seen_members: set = set()
-    # member content 累积缓冲：按 source_id 分别累积，避免流式闪烁
-    member_content_buffers: Dict[str, str] = {}
 
     def _flush_reasoning(hist: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """把 reasoning_buffer 固化到 history 末尾, 清空 buffer。"""
@@ -237,20 +235,11 @@ async def chat_handler(
                 if content_delta is not None and reasoning_buffer and source_id == reasoning_source:
                     history = _flush_reasoning(history)
 
-                # Team leader (Orchestrator) 的 content 累积到最终回答
+                # 只有 Team leader (Orchestrator) 的 content 累积到最终回答;
+                # member 的 content 通过 tool_call 体现, 不重复累积。
                 if content_delta and is_leader:
                     full_content += str(content_delta)
                     yield history + [render_response(full_content)]
-                # member (InsightAgent 等) 的 content 也累积，遇到完整段落时固化到 history
-                elif content_delta and not is_leader:
-                    mid = source_id or "unknown"
-                    member_content_buffers[mid] = member_content_buffers.get(mid, "") + str(content_delta)
-                    buf = member_content_buffers[mid]
-                    # 遇到双换行（段落结束）或事件标记闭合时，把缓冲固化到 history
-                    if "\n\n" in buf or ("<!--event:" in buf and "-->" in buf.split("<!--event:")[-1]):
-                        history = history + [render_response(buf)]
-                        member_content_buffers[mid] = ""
-                        yield history
 
             # ---- 运行完成 ----
             elif event_type == "RunCompleted":
@@ -261,15 +250,9 @@ async def chat_handler(
                         full_content = str(final)
 
         # ---- 流结束清理 ----
-        # 残留的 reasoning buffer 固化
+        # 残留的 reasoning buffer (例如最后一段思考没有 ReasoningCompleted) 也要固化
         if reasoning_buffer:
             history = _flush_reasoning(history)
-
-        # 残留的 member content buffer 固化
-        for mid, buf in member_content_buffers.items():
-            if buf.strip():
-                history = history + [render_response(buf)]
-        member_content_buffers.clear()
 
         # 最终回答
         if full_content:
