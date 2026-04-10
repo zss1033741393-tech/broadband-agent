@@ -3,10 +3,11 @@
 将 agno Team 的流式事件映射为 Gradio ChatMessage 格式。
 """
 
+import base64
 import json
 import re
+from pathlib import Path
 from typing import Any, Dict, List, Optional
-
 
 # ─── Agent 中文显示名（用于徽章标题） ───
 _AGENT_DISPLAY_NAMES = {
@@ -104,8 +105,35 @@ def render_tool_call(
             if stderr:
                 meta_parts.append(f"**stderr**:\n```\n{stderr}\n```")
             if stdout:
-                stdout_body = stdout
-                stdout_is_markdown = stdout.startswith("#")
+                # 检查 stdout 是否含 image_paths（如 wifi_simulation 产出）
+                _stdout_json = None
+                try:
+                    _stdout_json = json.loads(stdout)
+                except (json.JSONDecodeError, TypeError):
+                    pass
+
+                if isinstance(_stdout_json, dict) and _stdout_json.get("image_paths"):
+                    # 图片模式: 渲染 summary + 步骤状态 + base64 图片
+                    _steps_info = []
+                    for _st in _stdout_json.get("steps", []):
+                        _icon = "✅" if _st.get("status") == "success" else "❌"
+                        _st_name = _st.get("name", "")
+                        _steps_info.append(f"{_icon} Step {_st.get('step')}: {_st_name}")
+                    if _steps_info:
+                        meta_parts.append("**执行步骤**:\n" + "\n".join(_steps_info))
+
+                    _summary = _stdout_json.get("summary", "")
+                    _image_md = _render_images_base64(_stdout_json["image_paths"])
+                    stdout_parts = []
+                    if _summary:
+                        stdout_parts.append(f"**{_summary}**")
+                    if _image_md:
+                        stdout_parts.append(_image_md)
+                    stdout_body = "\n\n".join(stdout_parts)
+                    stdout_is_markdown = True
+                else:
+                    stdout_body = stdout
+                    stdout_is_markdown = stdout.startswith("#")
         else:
             meta_parts.append(f"**返回结果**:\n```json\n{_format_json(outputs)}\n```")
 
@@ -283,6 +311,42 @@ def render_response(content: str) -> Dict[str, Any]:
         "role": "assistant",
         "content": content,
     }
+
+
+def _render_images_base64(image_paths: List[Dict[str, str]]) -> str:
+    """将 image_paths 列表中的图片读取后转为 base64 内嵌 Markdown。
+
+    每张图渲染为: **标签** + ``<img>`` base64 标签。
+    """
+    parts: List[str] = []
+    _MIME_MAP = {
+        ".png": "image/png",
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".gif": "image/gif",
+    }
+    for img_info in image_paths:
+        label = img_info.get("label", "")
+        path_str = img_info.get("path", "")
+        if not path_str:
+            continue
+        p = Path(path_str)
+        if not p.exists():
+            parts.append(f"⚠️ 图片未找到: `{path_str}`")
+            continue
+        try:
+            raw = p.read_bytes()
+            b64 = base64.b64encode(raw).decode("utf-8")
+            mime = _MIME_MAP.get(p.suffix.lower(), "image/png")
+            if label:
+                parts.append(f"**{label}**")
+            parts.append(
+                f'<img src="data:{mime};base64,{b64}" '
+                f'alt="{label}" style="max-width:100%;border-radius:8px;" />'
+            )
+        except OSError:
+            parts.append(f"⚠️ 读取图片失败: `{path_str}`")
+    return "\n\n".join(parts)
 
 
 def _format_json(data: Any) -> str:
