@@ -1,4 +1,4 @@
-"""冒烟测试 — 覆盖新架构 (Team + 10 Skills) 的导入、配置与脚本执行。"""
+"""冒烟测试 — 覆盖 Team + 14 Skills 架构的导入、配置与脚本执行。"""
 
 import importlib.util
 import json
@@ -24,7 +24,6 @@ def test_config_files_exist():
     root = Path(_ROOT)
     assert (root / "configs" / "model.yaml").exists()
     assert (root / "configs" / "agents.yaml").exists()
-    assert (root / "configs" / "downstream.yaml").exists()
 
 
 def test_model_config_loads():
@@ -642,21 +641,25 @@ def test_data_insight_run_nl2code_blocks_dunder():
     assert result["status"] == "error"
 
 
-def test_wifi_simulation_four_steps():
+def test_wifi_simulation_three_steps():
+    """wifi_simulation 真实 3 阶段流水线：户型图处理 → 信号强度仿真 → 网络性能仿真。"""
     mod = _load_script("wifi_simulation", "simulate.py")
     result = json.loads(mod.simulate("{}"))
     assert result["skill"] == "wifi_simulation"
-    assert len(result["steps"]) == 4
+    assert len(result["steps"]) == 3
     step_names = [s["name"] for s in result["steps"]]
     assert step_names == [
-        "户型图识别",
-        "热力图生成",
-        "RSSI 采集",
-        "选点对比",
+        "户型图处理",
+        "信号强度仿真",
+        "网络性能仿真",
     ]
     for step in result["steps"]:
-        assert "echarts_option" in step
         assert step["status"] == "success"
+        assert "result" in step
+    # 验证汇总输出结构
+    assert result["status"] in ("ok", "partial")
+    assert "image_paths" in result
+    assert "summary" in result
 
 
 def test_report_rendering_legacy_analysis_form():

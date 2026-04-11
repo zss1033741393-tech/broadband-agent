@@ -39,7 +39,7 @@ OrchestratorTeam (leader, coordinate 模式)
 - Python 3.11 + [uv](https://docs.astral.sh/uv/) (包管理) + agno >= 2.5.14
 - Gradio (Web UI，流式事件处理 + SubAgent 徽章)
 - loguru (应用日志) + SQLite (会话持久化 + 完整轨迹存储) + JSONL (按天归档 trace)
-- Jinja2 (配置模板渲染) + httpx (下游 real 模式)
+- Jinja2 (配置模板渲染)
 - pandas / numpy / scipy / scikit-learn (数据洞察科学计算栈)
 
 ## 快速开始
@@ -100,8 +100,7 @@ $env:NO_PROXY="localhost,127.0.0.1"
 ├── requirements.txt        # pip 兼容依赖 (指向 pyproject.toml 为规范源)
 ├── configs/
 │   ├── model.yaml          # 模型 provider/endpoint
-│   ├── agents.yaml         # Team + 5 个 SubAgent 配置
-│   └── downstream.yaml     # 下游系统 mock/real 切换
+│   └── agents.yaml         # Team + 5 个 SubAgent 配置
 ├── prompts/
 │   ├── orchestrator.md     # Team leader 作业手册
 │   ├── planning.md         # PlanningAgent 作业手册
@@ -129,7 +128,6 @@ $env:NO_PROXY="localhost,127.0.0.1"
 │   ├── agent_factory.py    # create_team() — 装配 Team + 5 SubAgent
 │   ├── session_manager.py  # session_hash → Team + Tracer 隔离
 │   ├── model_loader.py     # 模型实例化 + prompt tracer 注入
-│   ├── downstream_client.py # mock/real 双模式客户端
 │   └── observability/      # SQLite DAO + loguru sink + JSONL tracer
 ├── ui/
 │   ├── app.py              # Gradio 入口 (Team 流式事件处理)
@@ -152,7 +150,6 @@ DB 和 JSONL 双写：任一写入失败不影响主流程。Tracer 通过 monke
 - `pyproject.toml` — 项目依赖声明（uv 规范源），含 ruff / pytest 配置
 - `configs/model.yaml` — 模型 provider / endpoint / role_map
 - `configs/agents.yaml` — Team + 5 个 SubAgent 的 prompt + skills 子集 + description + memory
-- `configs/downstream.yaml` — 下游系统 mock/real 切换
 - `skills/goal_parsing/references/slot_schema.yaml` — 综合目标槽位定义
 - `skills/plan_design/references/examples.md` — 方案设计 few-shot 样例
 

@@ -8,7 +8,7 @@
 
 ## 技术栈
 
-Python 3.11+、agno ≥ 2.5.14、Gradio 4.x（Web UI）、SQLite（会话持久化 + 完整轨迹存储）、Jinja2（模板渲染）、loguru（日志）、httpx（下游 real 模式）
+Python 3.11+、agno ≥ 2.5.14、Gradio 4.x（Web UI）、SQLite（会话持久化 + 完整轨迹存储）、Jinja2（模板渲染）、loguru（日志）
 
 ## 架构拓扑
 
@@ -34,13 +34,11 @@ OrchestratorTeam (leader, coordinate 模式, prompts/orchestrator.md)
 ```
 ├── configs/
 │   ├── model.yaml          # 模型 provider / base_url / api_key / role_map
-│   ├── agents.yaml         # Team + 5 SubAgent (prompt + skills 子集 + description)
-│   └── downstream.yaml     # 下游接口 mock/real 切换
+│   └── agents.yaml         # Team + 5 SubAgent (prompt + skills 子集 + description)
 ├── core/
 │   ├── agent_factory.py    # create_team() — 装配 Team + 5 SubAgent
 │   ├── model_loader.py     # 模型实例化 + prompt tracer 注入
 │   ├── session_manager.py  # session_hash → Team + Tracer 隔离
-│   ├── downstream_client.py # 下游 mock/real 双模式客户端
 │   └── observability/      # SQLite DAO + loguru sink + JSONL tracer
 ├── prompts/                # 4 份 SubAgent 作业手册
 │   ├── orchestrator.md     # Team leader: 意图识别 + 路由 + 方案拆分 + 结果汇总
@@ -101,8 +99,7 @@ OrchestratorTeam (leader, coordinate 模式, prompts/orchestrator.md)
 5. **可观测性双写（完整存储）**：SQLite + JSONL，写入失败不影响主流程。Tracer 向 Team leader 和所有 member 的 model 注入 prompt 回调。DB 和日志完整存储所有轨迹数据，不做截断
 6. **轨迹关联**：tool_calls 表通过 message_id 关联到触发它的用户消息，traces 表通过 agent_name 列支持按 agent 过滤查询，tool_calls 记录真实 latency_ms
 7. **会话生命周期**：`SessionManager` 在 Gradio `app.unload()` 时销毁会话，写入 `ended_at` 到 DB
-8. **下游 mock/real 切换**：`downstream.yaml` 的 `mode` 字段控制（real 模式依赖 httpx）
-9. **派发载荷 4 块结构**：Orchestrator 给 Provisioning 的载荷必须含"任务头 + 原始用户目标 + 关键画像 + 方案段落"，缺一不可
+8. **派发载荷 4 块结构**：Orchestrator 给 Provisioning 的载荷必须含"任务头 + 原始用户目标 + 关键画像 + 方案段落"，缺一不可
 
 ## Skills 开发规范
 
