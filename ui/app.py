@@ -247,6 +247,13 @@ async def chat_handler(
             elif event_type == "ToolCallStarted":
                 if reasoning_buffer and source_id == reasoning_source:
                     history = _flush_reasoning(history)
+                # 工具调用前，将该 member 已积累的文本固化到 history，
+                # 实现 "content → tool → content → tool" 的时序交错渲染，
+                # 避免所有 member content 堆积到 streaming tail 末尾。
+                if source_id and not is_leader and source_id in member_content_buffers:
+                    _mc = member_content_buffers.pop(source_id)
+                    if _mc:
+                        history = history + [render_member_content(_mc, member=source_id)]
                 tool = getattr(event, "tool", None)
                 if tool:
                     tool_name = getattr(tool, "tool_name", "") or getattr(
@@ -326,6 +333,7 @@ async def chat_handler(
                                 outputs=f"✅ {_member_id} 已完成 (返回 {_result_len} 字符，内容见上方 SubAgent 回复)",
                                 member=None,
                             )
+                            yield history + _build_streaming_tail()
                             continue
                     tool_label_source = source_id if not is_leader else None
                     history = history + render_tool_call(
@@ -334,6 +342,7 @@ async def chat_handler(
                         outputs=tool_result,
                         member=tool_label_source,
                     )
+                    yield history + _build_streaming_tail()
 
             # ---- 内容流 (RunContent) ----
             elif event_type == "RunContent":
