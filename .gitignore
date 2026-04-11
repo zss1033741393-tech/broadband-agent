@@ -222,5 +222,10 @@ vendor/*/build/
 vendor/*/src/*.egg-info/
 vendor/*/*.egg-info/
 
+# wifi_simulation 运行时产物 — 仿真图片输出和 DL 模型文件
+skills/wifi_simulation/data/
+skills/wifi_simulation/models/*.pt
+skills/wifi_simulation/models/*.pth
+
 # uv 工作区产物 (如有 uv workspace 文件)
 *.uvworkspace

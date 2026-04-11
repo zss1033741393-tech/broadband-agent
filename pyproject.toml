@@ -29,6 +29,11 @@ dependencies = [
     "pydantic>=2.0",
     # ── vendor 本地包 ──
     "ce-insight-core",
+    # ── wifi_simulation 依赖（图像处理 + 信号仿真 + 可视化）──
+    "opencv-python-headless>=4.8",
+    "matplotlib>=3.7",
+    "typer>=0.9",
+    "rich>=13.0",
 ]
 
 [dependency-groups]
