@@ -339,13 +339,6 @@ async def chat_handler(
                     final = getattr(event, "content", None)
                     if final and str(final) != full_content:
                         full_content = str(final)
-                    # 记录 leader 完成 (带最终内容)
-                    ctx.tracer.stream_event(
-                        raw_event_type,
-                        agent=agent,
-                        is_leader=True,
-                        content=str(final) if final else "",
-                    )
                 else:
                     # SubAgent 运行完成 — 将 member content buffer 固化到 history
                     if source_id and source_id in member_content_buffers:
@@ -374,12 +367,12 @@ async def chat_handler(
                 error_content = getattr(event, "content", "") or getattr(event, "error", "")
                 tool_name = getattr(tool, "tool_name", "unknown") if tool else "unknown"
                 _error_str = str(error_content)
-                ctx.tracer.stream_event(
-                    raw_event_type,
+                # 语义 trace：工具调用错误（JSONL + SQLite traces 表）
+                ctx.tracer.tool_result(
+                    tool_name,
+                    _error_str,
                     agent=agent,
                     is_leader=is_leader,
-                    tool_name=tool_name,
-                    content=_error_str,
                 )
                 # 错误事件也写入 tool_calls 表，status=error（完整存储）
                 if ctx.db_session_id:
@@ -402,15 +395,11 @@ async def chat_handler(
                 ]
                 yield history
 
-            # ---- 未识别事件 — 全量记录到 trace 供调试 ----
+            # ---- 未识别事件 — 记录到 trace 供调试 ----
             else:
                 if raw_event_type:
-                    content_val = getattr(event, "content", None)
-                    ctx.tracer.stream_event(
-                        raw_event_type,
-                        agent=agent,
-                        is_leader=is_leader,
-                        content=content_val,
+                    ctx.tracer.unhandled_event(
+                        raw_event_type, source_id=agent, is_leader=is_leader
                     )
                     logger.debug(
                         f"未处理事件: {raw_event_type} (agent={agent}, leader={is_leader})"
@@ -489,7 +478,7 @@ async def _streaming_with_reenable(message, history, session_state):
 
 def create_app() -> gr.Blocks:
     """创建 Gradio 应用。"""
-    with gr.Blocks(title="家宽网络调优助手", css=_CSS) as app:
+    with gr.Blocks(title="家宽网络调优助手") as app:
         gr.Markdown("# 🏠 家宽网络调优智能助手")
         gr.Markdown(
             "Team 架构：Orchestrator 路由 → PlanningAgent / InsightAgent / ProvisioningAgent × 3"
@@ -574,13 +563,14 @@ def create_app() -> gr.Blocks:
 
         new_session_btn.click(fn=new_session, outputs=[chatbot, session_state])
 
-        # Session 生命周期关闭 — 页面卸载时销毁会话，写入 ended_at
-        def _on_unload(sess_state):
-            sh = (sess_state or {}).get("session_hash")
-            if sh:
-                session_manager.destroy(sh)
+        # Session 生命周期关闭 — 页面卸载时销毁所有非活跃会话。
+        # Gradio 6.x unload() 不再支持 inputs 参数，无法从 State 中取具体的
+        # session_hash；退而求其次，在此仅做日志记录，实际 ended_at 写入依赖
+        # new_session_btn 点击时对旧会话的显式 destroy 调用。
+        def _on_unload():
+            logger.info("页面卸载 (Gradio 6.x: unload 无 State 输入，session cleanup 靠 GC)")
 
-        app.unload(_on_unload, inputs=[session_state])
+        app.unload(_on_unload)
 
     return app
 
@@ -592,4 +582,5 @@ if __name__ == "__main__":
         server_port=7860,
         share=True,
         theme=gr.themes.Soft(),
+        css=_CSS,
     )

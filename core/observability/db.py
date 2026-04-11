@@ -61,7 +61,6 @@ CREATE TABLE IF NOT EXISTS traces (
 CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_tool_calls_session ON tool_calls(session_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_traces_session ON traces(session_id, created_at);
-CREATE INDEX IF NOT EXISTS idx_traces_agent ON traces(agent_name, event_type);
 """
 
 
@@ -96,6 +95,14 @@ class Database:
                     conn.commit()
                 except sqlite3.OperationalError:
                     pass  # 列已存在，忽略
+            # agent_name 列确保存在后才能建索引（对旧 DB 做迁移时顺序不能提前）
+            try:
+                conn.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_traces_agent ON traces(agent_name, event_type)"
+                )
+                conn.commit()
+            except sqlite3.OperationalError:
+                pass
             # 自检：验证表存在且可写
             tables = [
                 r[0]
@@ -103,22 +110,43 @@ class Database:
                     "SELECT name FROM sqlite_master WHERE type='table'"
                 ).fetchall()
             ]
+            # 写入验证：插入后立即删除，确认 DB 可写
+            conn.execute(
+                "INSERT INTO sessions (session_hash, created_at) VALUES ('__selftest__', ?)",
+                (_now_iso(),),
+            )
+            conn.execute("DELETE FROM sessions WHERE session_hash='__selftest__'")
+            conn.commit()
             conn.close()
-            logger.info(f"SQLite schema 初始化完成: {self.db_path}, tables={tables}")
+            logger.info(f"SQLite schema 初始化完成 (可写验证通过): {self.db_path}, tables={tables}")
         except Exception:
             logger.exception(f"SQLite schema 初始化失败: {self.db_path}")
 
     # ---- sessions ----
     def create_session(self, session_hash: str, user_agent: str = "") -> Optional[int]:
+        """创建会话记录（幂等）。
+
+        使用 INSERT OR IGNORE 避免 UNIQUE 约束冲突（如应用重启后
+        客户端用相同 session_hash 重连），冲突时回退到 SELECT 获取已有 ID。
+        """
         conn = self._get_conn()
         try:
             cur = conn.execute(
-                "INSERT INTO sessions (session_hash, created_at, user_agent) VALUES (?, ?, ?)",
+                "INSERT OR IGNORE INTO sessions (session_hash, created_at, user_agent) VALUES (?, ?, ?)",
                 (session_hash, _now_iso(), user_agent),
             )
             conn.commit()
             sid = cur.lastrowid
-            logger.debug(f"create_session 成功: session_hash={session_hash[:8]}..., db_sid={sid}")
+            if not sid:
+                # UNIQUE 冲突时 lastrowid 为 0，回退查询已有记录
+                row = conn.execute(
+                    "SELECT id FROM sessions WHERE session_hash=?", (session_hash,)
+                ).fetchone()
+                sid = row["id"] if row else None
+            if sid:
+                logger.debug(f"create_session 成功: session_hash={session_hash[:8]}..., db_sid={sid}")
+            else:
+                logger.error(f"create_session 无法获取 sid: session_hash={session_hash[:8]}...")
             return sid
         except Exception:
             logger.exception(

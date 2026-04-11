@@ -24,6 +24,35 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _safe_serialize(obj: Any) -> Any:
+    """将 payload 安全降级为 JSON 可序列化形式。
+
+    处理 agno 内部对象（ToolExecution、dataclass、Pydantic BaseModel 等），
+    避免 json.dumps 在 default=str 之前因嵌套容器中的不可序列化对象而失败。
+    """
+    if obj is None or isinstance(obj, (bool, int, float, str)):
+        return obj
+    if isinstance(obj, dict):
+        return {k: _safe_serialize(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_safe_serialize(v) for v in obj]
+    # Pydantic BaseModel
+    if hasattr(obj, "model_dump"):
+        try:
+            return obj.model_dump(mode="json")
+        except Exception:
+            pass
+    # dataclass
+    if hasattr(obj, "__dataclass_fields__"):
+        try:
+            from dataclasses import asdict
+            return asdict(obj)
+        except Exception:
+            pass
+    # 其他对象 → 降级为字符串
+    return str(obj)
+
+
 def _write_jsonl(
     event_type: str,
     session_hash: str,
@@ -45,6 +74,7 @@ def _write_jsonl(
         _TRACE_DIR.mkdir(parents=True, exist_ok=True)
         today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         filepath = _TRACE_DIR / f"{today}.jsonl"
+        safe_payload = _safe_serialize(payload)
         line = json.dumps(
             {
                 "ts": _now_iso(),
@@ -52,7 +82,7 @@ def _write_jsonl(
                 "agent": agent,
                 "is_leader": is_leader,
                 "event": event_type,
-                "payload": payload,
+                "payload": safe_payload,
             },
             ensure_ascii=False,
             default=str,
@@ -84,9 +114,10 @@ class Tracer:
     ) -> None:
         """写入一条 trace 事件（SQLite + JSONL 双写）。"""
         try:
+            safe_payload = _safe_serialize(payload)
             if self.db_session_id is not None:
                 # agent 信息同时存入独立列（可索引）和 payload（兼容旧查询）
-                enriched = payload if isinstance(payload, dict) else {"data": payload}
+                enriched = safe_payload if isinstance(safe_payload, dict) else {"data": safe_payload}
                 enriched = {**enriched, "_agent": agent, "_is_leader": is_leader}
                 db.insert_trace(
                     self.db_session_id,
@@ -95,7 +126,7 @@ class Tracer:
                     enriched,
                     agent_name=agent,
                 )
-            _write_jsonl(event_type, self.session_hash, payload, agent=agent, is_leader=is_leader)
+            _write_jsonl(event_type, self.session_hash, safe_payload, agent=agent, is_leader=is_leader)
         except Exception:
             logger.warning(f"trace write failed: {event_type}")
 
@@ -157,35 +188,6 @@ class Tracer:
             agent=agent_name or "orchestrator",
             is_leader=is_leader,
         )
-
-    # ─── 流事件全量记录 (每个 agno 事件都调用) ─────────────────────────
-
-    def stream_event(
-        self,
-        raw_event_type: str,
-        *,
-        agent: str = "",
-        is_leader: bool = False,
-        content: Any = None,
-        tool_name: str = "",
-        tool_args: Any = None,
-        tool_result: Any = None,
-    ) -> None:
-        """记录 agno 流事件 — 用于完整重建 agent 交互过程。
-
-        每个事件类型 (ReasoningContentDelta / ToolCallStarted / RunContent 等)
-        都调用一次，不论前端是否渲染。
-        """
-        payload: dict[str, Any] = {"raw_event": raw_event_type}
-        if content is not None:
-            payload["content"] = str(content)
-        if tool_name:
-            payload["tool_name"] = tool_name
-        if tool_args is not None:
-            payload["tool_args"] = tool_args
-        if tool_result is not None:
-            payload["tool_result"] = tool_result
-        self.trace("stream_event", payload, agent=agent, is_leader=is_leader)
 
     # ─── 思考 ────────────────────────────────────────────────────────
 
