@@ -2,6 +2,7 @@
 
 import json
 import sys
+import time
 import uuid
 from pathlib import Path
 from typing import Any, AsyncIterator, Dict, List, Optional
@@ -27,19 +28,6 @@ from ui.chat_renderer import (
 
 # 初始化日志
 setup_logger()
-
-_MAX_DB_FIELD_LEN = 4000
-
-
-def _safe_truncate(val: Any, max_len: int = _MAX_DB_FIELD_LEN) -> str:
-    """JSON 安全截断 — 避免 str()[:N] 损坏 JSON 结构。"""
-    try:
-        s = json.dumps(val, ensure_ascii=False, default=str) if not isinstance(val, str) else val
-    except (TypeError, ValueError):
-        s = str(val)
-    if len(s) <= max_len:
-        return s
-    return s[: max_len - 3] + "..."
 
 
 # ─── 事件解析工具 ──────────────────────────────────────────────────────
@@ -117,8 +105,9 @@ async def chat_handler(
 
     # Trace 用户请求
     ctx.tracer.request(message)
+    user_msg_id: Optional[int] = None
     if ctx.db_session_id:
-        db.insert_message(ctx.db_session_id, "user", message)
+        user_msg_id = db.insert_message(ctx.db_session_id, "user", message)
 
     # 添加用户消息到历史
     history = history + [{"role": "user", "content": message}]
@@ -132,6 +121,8 @@ async def chat_handler(
     seen_members: set = set()
     # per-member content 缓冲区 — 用于流式展示 SubAgent 的文本回复
     member_content_buffers: Dict[str, str] = {}
+    # tool call 计时器 — ToolCallStarted 时记录，ToolCallCompleted 时计算延迟
+    tool_start_times: Dict[str, float] = {}
 
     def _build_streaming_tail() -> List[Dict[str, Any]]:
         """构造流式 yield 时附加的全部 pending 内容（解决 member 内容闪烁问题）。
@@ -227,6 +218,9 @@ async def chat_handler(
                     tool_args = getattr(tool, "tool_args", None) or getattr(
                         tool, "function_args", None
                     )
+                    # 记录工具调用开始时间，用于计算延迟
+                    _tool_key = f"{source_id or ''}:{tool_name}"
+                    tool_start_times[_tool_key] = time.monotonic()
                     ctx.tracer.tool_invoke(tool_name, tool_args, agent=agent, is_leader=is_leader)
                     tool_label_source = source_id if not is_leader else None
                     yield (
@@ -246,14 +240,36 @@ async def chat_handler(
                         tool, "function_args", None
                     )
                     tool_result = getattr(tool, "result", None) or getattr(event, "content", None)
-                    ctx.tracer.tool_result(tool_name, tool_result, agent=agent, is_leader=is_leader)
+                    # 计算工具调用延迟
+                    _tool_key = f"{source_id or ''}:{tool_name}"
+                    _start = tool_start_times.pop(_tool_key, None)
+                    _latency_ms = int((time.monotonic() - _start) * 1000) if _start else 0
+                    ctx.tracer.tool_result(
+                        tool_name,
+                        tool_result,
+                        latency_ms=_latency_ms,
+                        agent=agent,
+                        is_leader=is_leader,
+                    )
                     if ctx.db_session_id:
+                        _inputs_str = (
+                            json.dumps(tool_args, ensure_ascii=False, default=str)
+                            if tool_args and not isinstance(tool_args, str)
+                            else (tool_args or "")
+                        )
+                        _outputs_str = (
+                            json.dumps(tool_result, ensure_ascii=False, default=str)
+                            if tool_result and not isinstance(tool_result, str)
+                            else (tool_result or "")
+                        )
                         db.insert_tool_call(
                             ctx.db_session_id,
                             skill_name=tool_name,
-                            inputs_json=_safe_truncate(tool_args) if tool_args else "",
-                            outputs_json=_safe_truncate(tool_result) if tool_result else "",
+                            inputs_json=_inputs_str,
+                            outputs_json=_outputs_str,
+                            latency_ms=_latency_ms,
                             status="ok",
+                            message_id=user_msg_id,
                         )
                     # delegate_task_to_member 去重: 如果 member content 已通过
                     # RunContent 展示, 则只显示摘要, 避免重复输出完整内容
@@ -337,6 +353,14 @@ async def chat_handler(
                         if mc:
                             ctx.tracer.member_content(source_id, mc)
                             history = history + [render_member_content(mc, member=source_id)]
+                            # 存储 member content 到 DB messages 表
+                            if ctx.db_session_id:
+                                db.insert_message(
+                                    ctx.db_session_id,
+                                    "assistant",
+                                    mc,
+                                    parent_msg_id=user_msg_id,
+                                )
                             yield history
                     final_content = getattr(event, "content", None)
                     ctx.tracer.member_completed(
@@ -349,18 +373,31 @@ async def chat_handler(
                 tool = getattr(event, "tool", None)
                 error_content = getattr(event, "content", "") or getattr(event, "error", "")
                 tool_name = getattr(tool, "tool_name", "unknown") if tool else "unknown"
+                _error_str = str(error_content)
                 ctx.tracer.stream_event(
                     raw_event_type,
                     agent=agent,
                     is_leader=is_leader,
                     tool_name=tool_name,
-                    content=str(error_content)[:500],
+                    content=_error_str,
                 )
+                # 错误事件也写入 tool_calls 表，status=error（完整存储）
+                if ctx.db_session_id:
+                    db.insert_tool_call(
+                        ctx.db_session_id,
+                        skill_name=tool_name,
+                        inputs_json="",
+                        outputs_json=_error_str,
+                        status="error",
+                        message_id=user_msg_id,
+                    )
+                # UI 展示可截取摘要，完整错误已在 DB/trace 中
+                _display_error = _error_str[:500] if len(_error_str) > 500 else _error_str
                 history = history + [
                     {
                         "role": "assistant",
                         "metadata": {"title": f"⚠️ 工具执行失败: {tool_name}"},
-                        "content": str(error_content)[:500] or "未知错误",
+                        "content": _display_error or "未知错误",
                     }
                 ]
                 yield history

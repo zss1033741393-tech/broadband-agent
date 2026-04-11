@@ -11,6 +11,7 @@ from typing import Any, Optional
 
 from loguru import logger
 
+
 _DB_PATH = Path(__file__).resolve().parents[2] / "data" / "sessions.db"
 
 _SCHEMA_SQL = """
@@ -51,6 +52,7 @@ CREATE TABLE IF NOT EXISTS traces (
     session_id INTEGER NOT NULL,
     session_hash TEXT NOT NULL DEFAULT '',
     event_type TEXT NOT NULL,
+    agent_name TEXT NOT NULL DEFAULT '',
     payload_json TEXT,
     created_at TEXT NOT NULL,
     FOREIGN KEY (session_id) REFERENCES sessions(id)
@@ -59,6 +61,7 @@ CREATE TABLE IF NOT EXISTS traces (
 CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_tool_calls_session ON tool_calls(session_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_traces_session ON traces(session_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_traces_agent ON traces(agent_name, event_type);
 """
 
 
@@ -83,12 +86,16 @@ class Database:
         try:
             conn = self._get_conn()
             conn.executescript(_SCHEMA_SQL)
-            # 兼容旧 schema：traces 表可能缺少 session_hash 列
-            try:
-                conn.execute("ALTER TABLE traces ADD COLUMN session_hash TEXT NOT NULL DEFAULT ''")
-                conn.commit()
-            except sqlite3.OperationalError:
-                pass  # 列已存在，忽略
+            # 兼容旧 schema：traces 表可能缺少新增列
+            for col_sql in (
+                "ALTER TABLE traces ADD COLUMN session_hash TEXT NOT NULL DEFAULT ''",
+                "ALTER TABLE traces ADD COLUMN agent_name TEXT NOT NULL DEFAULT ''",
+            ):
+                try:
+                    conn.execute(col_sql)
+                    conn.commit()
+                except sqlite3.OperationalError:
+                    pass  # 列已存在，忽略
             # 自检：验证表存在且可写
             tables = [
                 r[0]
@@ -201,14 +208,19 @@ class Database:
 
     # ---- traces ----
     def insert_trace(
-        self, session_id: int, session_hash: str, event_type: str, payload: Any = None
+        self,
+        session_id: int,
+        session_hash: str,
+        event_type: str,
+        payload: Any = None,
+        agent_name: str = "",
     ) -> None:
         conn = self._get_conn()
         try:
             payload_str = json.dumps(payload, ensure_ascii=False, default=str) if payload else "{}"
             conn.execute(
-                "INSERT INTO traces (session_id, session_hash, event_type, payload_json, created_at) VALUES (?, ?, ?, ?, ?)",
-                (session_id, session_hash, event_type, payload_str, _now_iso()),
+                "INSERT INTO traces (session_id, session_hash, event_type, agent_name, payload_json, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+                (session_id, session_hash, event_type, agent_name, payload_str, _now_iso()),
             )
             conn.commit()
         except Exception:

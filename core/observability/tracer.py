@@ -85,10 +85,16 @@ class Tracer:
         """写入一条 trace 事件（SQLite + JSONL 双写）。"""
         try:
             if self.db_session_id is not None:
-                # SQLite traces 表存储 agent 信息到 payload 中
+                # agent 信息同时存入独立列（可索引）和 payload（兼容旧查询）
                 enriched = payload if isinstance(payload, dict) else {"data": payload}
                 enriched = {**enriched, "_agent": agent, "_is_leader": is_leader}
-                db.insert_trace(self.db_session_id, self.session_hash, event_type, enriched)
+                db.insert_trace(
+                    self.db_session_id,
+                    self.session_hash,
+                    event_type,
+                    enriched,
+                    agent_name=agent,
+                )
             _write_jsonl(event_type, self.session_hash, payload, agent=agent, is_leader=is_leader)
         except Exception:
             logger.warning(f"trace write failed: {event_type}")
@@ -172,7 +178,7 @@ class Tracer:
         """
         payload: dict[str, Any] = {"raw_event": raw_event_type}
         if content is not None:
-            payload["content"] = str(content)[:2000]
+            payload["content"] = str(content)
         if tool_name:
             payload["tool_name"] = tool_name
         if tool_args is not None:

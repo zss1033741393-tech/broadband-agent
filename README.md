@@ -32,14 +32,14 @@ OrchestratorTeam (leader, coordinate 模式)
 - **`fault_diagnosis / differentiated_delivery`**：Generator 范式 — SKILL.md 声明参数 schema，Jinja2 模板纯参数填空，**无业务规则分支**（业务规则已上移到 PlanningAgent）
 - **`goal_parsing / plan_review`**：Inversion + Reviewer — 有状态/确定性任务保留脚本
 - **`insight_*`**（6 个 Skill）：Pipeline — Plan → [Decompose → Execute → Reflect] × N Phase → Report 驱动，接入 `ce_insight_core` 真实计算内核（三元组查询 + 12 种洞察函数 + NL2Code 沙箱）
-- **`wifi_simulation`**：Pipeline — 单脚本内部自驱 4 步（户型图识别 → 热力图 → RSSI → 选点对比）
+- **`wifi_simulation`**：Pipeline — 单脚本内部 3+1 步（户型图处理 → 信号强度仿真 → 网络性能仿真，选点可选）
 
 ## 技术栈
 
 - Python 3.11 + [uv](https://docs.astral.sh/uv/) (包管理) + agno >= 2.5.14
-- Gradio (Web UI)
-- loguru (应用日志) + SQLite (会话持久化与业务追踪)
-- Jinja2 (配置模板渲染)
+- Gradio (Web UI，流式事件处理 + SubAgent 徽章)
+- loguru (应用日志) + SQLite (会话持久化 + 完整轨迹存储) + JSONL (按天归档 trace)
+- Jinja2 (配置模板渲染) + httpx (下游 real 模式)
 - pandas / numpy / scipy / scikit-learn (数据洞察科学计算栈)
 
 ## 快速开始
@@ -137,6 +137,16 @@ $env:NO_PROXY="localhost,127.0.0.1"
 └── tests/test_smoke.py     # 冒烟测试
 ```
 
+## 可观测性
+
+完整的轨迹存储体系，覆盖 agent/subagent 交互全流程：
+
+- **SQLite 数据库** (`data/sessions.db`)：4 张表 — `sessions`（会话生命周期）、`messages`（用户/assistant 消息，含 SubAgent 回复）、`tool_calls`（Skill 调用记录，含 latency_ms + message_id 关联 + 成功/失败状态）、`traces`（全量事件轨迹，含 agent_name 索引列）
+- **JSONL 日志** (`data/logs/trace/YYYY-MM-DD.jsonl`)：按天归档，完整记录不截断，每条含 agent / is_leader 字段，并行 SubAgent 通过 agent 字段天然隔离
+- **应用日志** (`data/logs/app/`)：loguru 按天轮转，7 天保留
+
+DB 和 JSONL 双写：任一写入失败不影响主流程。Tracer 通过 monkey-patch 注入 Team leader 和所有 member 的 model，自动拦截 LLM 调用记录完整 prompt。
+
 ## 配置说明
 
 - `pyproject.toml` — 项目依赖声明（uv 规范源），含 ruff / pytest 配置
@@ -156,4 +166,4 @@ uv run pytest tests/test_smoke.py -v
 pytest tests/test_smoke.py -v
 ```
 
-覆盖配置加载、Skill 脚本执行、UI 渲染、Team 装配、可观测性。
+49 项冒烟测试，覆盖配置加载、14 个 Skill 脚本执行、UI 渲染（流式事件处理 + 思考隔离 + 工具调用折叠）、Team 装配（5 SubAgent + 正确 Skill 子集）、可观测性（SQLite schema + trace 双写）。

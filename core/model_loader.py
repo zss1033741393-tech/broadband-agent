@@ -68,18 +68,18 @@ def create_model(config: Dict[str, Any] = None):
     elif provider == "openai_like":
         from agno.models.openai.like import OpenAILike
 
-        model = OpenAILike(
-            **common_params,
-            base_url=config.get("base_url", ""),
-        )
+        params = {**common_params, "base_url": config.get("base_url", "")}
+        if role_map:
+            params["role_map"] = role_map
+        model = OpenAILike(**params)
     else:
         # 通用 OpenAI 兼容
         from agno.models.openai.like import OpenAILike
 
-        model = OpenAILike(
-            **common_params,
-            base_url=config.get("base_url", ""),
-        )
+        params = {**common_params, "base_url": config.get("base_url", "")}
+        if role_map:
+            params["role_map"] = role_map
+        model = OpenAILike(**params)
 
     logger.info(f"模型创建成功: {provider} / {common_params['id']}")
     return model
