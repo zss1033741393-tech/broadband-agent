@@ -253,7 +253,13 @@ async def chat_handler(
                 if source_id and not is_leader and source_id in member_content_buffers:
                     _mc = member_content_buffers.pop(source_id)
                     if _mc:
+                        ctx.tracer.member_content(source_id, _mc)
                         history = history + [render_member_content(_mc, member=source_id)]
+                        if ctx.db_session_id:
+                            db.insert_message(
+                                ctx.db_session_id, "assistant", _mc,
+                                parent_msg_id=user_msg_id,
+                            )
                 tool = getattr(event, "tool", None)
                 if tool:
                     tool_name = getattr(tool, "tool_name", "") or getattr(
