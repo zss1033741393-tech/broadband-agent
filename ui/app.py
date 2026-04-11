@@ -81,6 +81,43 @@ def _extract_source_id(event: Any, is_leader: bool) -> Optional[str]:
     return None
 
 
+def _ensure_json_str(data: Any) -> str:
+    """将任意数据序列化为 JSON 字符串（ensure_ascii=False）。
+
+    当 data 已是 JSON 字符串时（如 agno get_skill_script 返回值），
+    先解析为 dict 再重新序列化，消除内部的 unicode 转义（\\uXXXX → 中文）。
+    """
+    if not data:
+        return ""
+    if isinstance(data, str):
+        try:
+            parsed = json.loads(data)
+            return json.dumps(parsed, ensure_ascii=False, default=str)
+        except (json.JSONDecodeError, TypeError):
+            return data
+    return json.dumps(data, ensure_ascii=False, default=str)
+
+
+# agno 框架生命周期事件 — 正常流程的内部状态信号，不记入业务 trace。
+# 覆盖 Agent 级和 Team 级（带 Team 前缀），_normalize_event_type 不在此处使用。
+_AGNO_LIFECYCLE_EVENTS = frozenset({
+    # Agent 级
+    "RunStarted", "RunContentCompleted", "RunContinued",
+    "ModelRequestStarted", "ModelRequestCompleted",
+    "ReasoningStarted", "ReasoningCompleted",
+    "MemoryUpdateStarted", "MemoryUpdateCompleted",
+    "SessionSummaryStarted", "SessionSummaryCompleted",
+    "CompressionStarted", "CompressionCompleted",
+    "FollowupsStarted", "FollowupsCompleted",
+    # Team 级 (带 Team 前缀)
+    "TeamRunStarted", "TeamRunContentCompleted", "TeamRunContinued",
+    "TeamModelRequestStarted", "TeamModelRequestCompleted",
+    "TeamReasoningStarted", "TeamReasoningCompleted",
+    "TeamCompressionStarted", "TeamCompressionCompleted",
+    "TeamFollowupsStarted", "TeamFollowupsCompleted",
+})
+
+
 async def chat_handler(
     message: str,
     history: List[Dict[str, Any]],
@@ -252,16 +289,8 @@ async def chat_handler(
                         is_leader=is_leader,
                     )
                     if ctx.db_session_id:
-                        _inputs_str = (
-                            json.dumps(tool_args, ensure_ascii=False, default=str)
-                            if tool_args and not isinstance(tool_args, str)
-                            else (tool_args or "")
-                        )
-                        _outputs_str = (
-                            json.dumps(tool_result, ensure_ascii=False, default=str)
-                            if tool_result and not isinstance(tool_result, str)
-                            else (tool_result or "")
-                        )
+                        _inputs_str = _ensure_json_str(tool_args)
+                        _outputs_str = _ensure_json_str(tool_result)
                         db.insert_tool_call(
                             ctx.db_session_id,
                             skill_name=tool_name,
@@ -395,9 +424,9 @@ async def chat_handler(
                 ]
                 yield history
 
-            # ---- 未识别事件 — 记录到 trace 供调试 ----
+            # ---- 未识别事件 — 仅记录真正意外的事件类型 ----
             else:
-                if raw_event_type:
+                if raw_event_type and raw_event_type not in _AGNO_LIFECYCLE_EVENTS:
                     ctx.tracer.unhandled_event(
                         raw_event_type, source_id=agent, is_leader=is_leader
                     )
