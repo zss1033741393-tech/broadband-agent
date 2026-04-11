@@ -219,7 +219,7 @@ async def chat_handler(
                     # 保证徽章不会插到旧思考的中间
                     history = _flush_reasoning(history)
                     history = history + [render_member_badge(source_id)]
-                    yield history
+                    yield history + _build_streaming_tail()
 
             # ---- 思考/推理 (ReasoningContentDelta 事件) ----
             if event_type == "ReasoningContentDelta":
@@ -241,7 +241,7 @@ async def chat_handler(
                 # 只 flush 匹配 source 的 buffer, 防止误伤其他 member 的 in-flight 思考
                 if reasoning_buffer and source_id == reasoning_source:
                     history = _flush_reasoning(history)
-                    yield history
+                    yield history + _build_streaming_tail()
 
             # ---- 工具调用开始 ----
             elif event_type == "ToolCallStarted":
@@ -392,7 +392,7 @@ async def chat_handler(
                                     mc,
                                     parent_msg_id=user_msg_id,
                                 )
-                            yield history
+                            yield history + _build_streaming_tail()
                     final_content = getattr(event, "content", None)
                     ctx.tracer.member_completed(
                         source_id or "unknown",
@@ -431,7 +431,7 @@ async def chat_handler(
                         "content": _display_error or "未知错误",
                     }
                 ]
-                yield history
+                yield history + _build_streaming_tail()
 
             # ---- 未识别事件 — 仅记录真正意外的事件类型 ----
             else:
