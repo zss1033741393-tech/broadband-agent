@@ -3,11 +3,9 @@
 通过 configs/downstream.yaml 的 mode 字段切换。
 """
 
-import json
 import random
-import time
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 import yaml
 from loguru import logger
@@ -25,7 +23,11 @@ def _load_config() -> Dict[str, Any]:
 _MOCK_RESPONSES: Dict[str, list] = {
     "dispatch_cei": [
         {"status": "success", "message": "CEI Spark 配置下发成功", "config_id": "CEI-20260407-001"},
-        {"status": "partial_success", "message": "CEI 配置下发部分成功，2/3 节点已生效", "config_id": "CEI-20260407-002"},
+        {
+            "status": "partial_success",
+            "message": "CEI 配置下发部分成功，2/3 节点已生效",
+            "config_id": "CEI-20260407-002",
+        },
         {"status": "failed", "message": "CEI 配置下发失败：目标 OLT 不可达", "error_code": "E1001"},
     ],
     "dispatch_fault": [
@@ -38,22 +40,59 @@ _MOCK_RESPONSES: Dict[str, list] = {
     ],
     "dispatch_wifi": [
         {"status": "success", "message": "Wifi 仿真配置下发成功", "sim_id": "WIFI-20260407-001"},
-        {"status": "partial_success", "message": "Wifi 仿真部分完成", "sim_id": "WIFI-20260407-002"},
+        {
+            "status": "partial_success",
+            "message": "Wifi 仿真部分完成",
+            "sim_id": "WIFI-20260407-002",
+        },
     ],
     "constraint_check": [
         {"passed": True, "message": "所有约束校验通过", "warnings": []},
-        {"passed": True, "message": "约束校验通过，但有警告", "warnings": ["时段与现有策略有重叠，请确认优先级"]},
-        {"passed": False, "message": "约束校验不通过", "errors": ["CEI 配置与现有网络拓扑冲突", "保障时段超出 SLA 范围"]},
+        {
+            "passed": True,
+            "message": "约束校验通过，但有警告",
+            "warnings": ["时段与现有策略有重叠，请确认优先级"],
+        },
+        {
+            "passed": False,
+            "message": "约束校验不通过",
+            "errors": ["CEI 配置与现有网络拓扑冲突", "保障时段超出 SLA 范围"],
+        },
     ],
     "data_query": [
         {
             "status": "success",
             "data": [
-                {"pon_port": "PON-1/0/1", "cei_score": 62.5, "user_count": 48, "bandwidth_util": 0.87},
-                {"pon_port": "PON-1/0/3", "cei_score": 55.2, "user_count": 52, "bandwidth_util": 0.93},
-                {"pon_port": "PON-2/0/2", "cei_score": 71.8, "user_count": 35, "bandwidth_util": 0.72},
-                {"pon_port": "PON-2/0/5", "cei_score": 48.9, "user_count": 60, "bandwidth_util": 0.95},
-                {"pon_port": "PON-3/0/1", "cei_score": 82.1, "user_count": 28, "bandwidth_util": 0.55},
+                {
+                    "pon_port": "PON-1/0/1",
+                    "cei_score": 62.5,
+                    "user_count": 48,
+                    "bandwidth_util": 0.87,
+                },
+                {
+                    "pon_port": "PON-1/0/3",
+                    "cei_score": 55.2,
+                    "user_count": 52,
+                    "bandwidth_util": 0.93,
+                },
+                {
+                    "pon_port": "PON-2/0/2",
+                    "cei_score": 71.8,
+                    "user_count": 35,
+                    "bandwidth_util": 0.72,
+                },
+                {
+                    "pon_port": "PON-2/0/5",
+                    "cei_score": 48.9,
+                    "user_count": 60,
+                    "bandwidth_util": 0.95,
+                },
+                {
+                    "pon_port": "PON-3/0/1",
+                    "cei_score": 82.1,
+                    "user_count": 28,
+                    "bandwidth_util": 0.55,
+                },
             ],
             "query_time_ms": 230,
         },
@@ -95,6 +134,7 @@ async def dispatch(endpoint: str, payload: Any = None) -> Dict[str, Any]:
 
     try:
         import httpx
+
         async with httpx.AsyncClient(timeout=timeout) as client:
             resp = await client.post(url, json=payload or {})
             resp.raise_for_status()

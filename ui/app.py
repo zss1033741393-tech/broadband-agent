@@ -14,9 +14,9 @@ _PROJECT_ROOT = str(Path(__file__).resolve().parents[1])
 if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
 
-from core.observability.logger import setup_logger
 from core.observability.db import db
-from core.session_manager import SessionContext, session_manager
+from core.observability.logger import setup_logger
+from core.session_manager import session_manager
 from ui.chat_renderer import (
     render_member_badge,
     render_member_content,
@@ -50,7 +50,7 @@ def _normalize_event_type(raw: str) -> str:
     if not raw:
         return ""
     if raw.startswith("Team"):
-        return raw[len("Team"):]
+        return raw[len("Team") :]
     return raw
 
 
@@ -113,8 +113,8 @@ async def chat_handler(
 
     full_content = ""
     reasoning_buffer = ""
-    reasoning_source: Optional[str] = None      # 当前 in-flight thinking 归属的 source_id
-    current_member: Optional[str] = None        # 最近一次 member 事件的 source_id (非 leader)
+    reasoning_source: Optional[str] = None  # 当前 in-flight thinking 归属的 source_id
+    current_member: Optional[str] = None  # 最近一次 member 事件的 source_id (非 leader)
     # 本轮已渲染过徽章的 member 集合 — 每个 SubAgent 只展示一次入场标记。
     seen_members: set = set()
     # per-member content 缓冲区 — 用于流式展示 SubAgent 的文本回复
@@ -190,13 +190,11 @@ async def chat_handler(
                     history = _flush_reasoning(history)
                 tool = getattr(event, "tool", None)
                 if tool:
-                    tool_name = (
-                        getattr(tool, "tool_name", "")
-                        or getattr(tool, "function_name", "unknown")
+                    tool_name = getattr(tool, "tool_name", "") or getattr(
+                        tool, "function_name", "unknown"
                     )
-                    tool_args = (
-                        getattr(tool, "tool_args", None)
-                        or getattr(tool, "function_args", None)
+                    tool_args = getattr(tool, "tool_args", None) or getattr(
+                        tool, "function_args", None
                     )
                     ctx.tracer.tool_invoke(tool_name, tool_args, agent=agent, is_leader=is_leader)
                     tool_label_source = source_id if not is_leader else None
@@ -208,17 +206,13 @@ async def chat_handler(
             elif event_type == "ToolCallCompleted":
                 tool = getattr(event, "tool", None)
                 if tool:
-                    tool_name = (
-                        getattr(tool, "tool_name", "")
-                        or getattr(tool, "function_name", "unknown")
+                    tool_name = getattr(tool, "tool_name", "") or getattr(
+                        tool, "function_name", "unknown"
                     )
-                    tool_args = (
-                        getattr(tool, "tool_args", None)
-                        or getattr(tool, "function_args", None)
+                    tool_args = getattr(tool, "tool_args", None) or getattr(
+                        tool, "function_args", None
                     )
-                    tool_result = getattr(tool, "result", None) or getattr(
-                        event, "content", None
-                    )
+                    tool_result = getattr(tool, "result", None) or getattr(event, "content", None)
                     ctx.tracer.tool_result(tool_name, tool_result, agent=agent, is_leader=is_leader)
                     if ctx.db_session_id:
                         db.insert_tool_call(
@@ -294,7 +288,9 @@ async def chat_handler(
                         full_content = str(final)
                     # 记录 leader 完成 (带最终内容)
                     ctx.tracer.stream_event(
-                        raw_event_type, agent=agent, is_leader=True,
+                        raw_event_type,
+                        agent=agent,
+                        is_leader=True,
                         content=str(final) if final else "",
                     )
                 else:
@@ -401,8 +397,7 @@ def create_app() -> gr.Blocks:
     with gr.Blocks(title="家宽网络调优助手", css=_CSS) as app:
         gr.Markdown("# 🏠 家宽网络调优智能助手")
         gr.Markdown(
-            "Team 架构：Orchestrator 路由 → PlanningAgent / InsightAgent / "
-            "ProvisioningAgent × 3"
+            "Team 架构：Orchestrator 路由 → PlanningAgent / InsightAgent / ProvisioningAgent × 3"
         )
 
         session_state = gr.State(value={"session_hash": str(uuid.uuid4())})
@@ -419,9 +414,7 @@ def create_app() -> gr.Blocks:
         for row_msgs in rows:
             with gr.Row():
                 for msg in row_msgs:
-                    example_btns.append(
-                        gr.Button(msg, elem_classes=["example-btn"], size="sm")
-                    )
+                    example_btns.append(gr.Button(msg, elem_classes=["example-btn"], size="sm"))
 
         with gr.Row():
             msg_input = gr.Textbox(

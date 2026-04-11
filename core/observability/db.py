@@ -5,10 +5,9 @@
 
 import json
 import sqlite3
-import sys
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 
 from loguru import logger
 
@@ -87,7 +86,12 @@ class Database:
             except sqlite3.OperationalError:
                 pass  # 列已存在，忽略
             # 自检：验证表存在且可写
-            tables = [r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()]
+            tables = [
+                r[0]
+                for r in conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table'"
+                ).fetchall()
+            ]
             conn.close()
             logger.info(f"SQLite schema 初始化完成: {self.db_path}, tables={tables}")
         except Exception:
@@ -107,7 +111,9 @@ class Database:
             logger.debug(f"create_session 成功: session_hash={session_hash[:8]}..., db_sid={sid}")
             return sid
         except Exception:
-            logger.exception(f"create_session 失败: session_hash={session_hash[:8]}..., db_path={self.db_path}")
+            logger.exception(
+                f"create_session 失败: session_hash={session_hash[:8]}..., db_path={self.db_path}"
+            )
             return None
 
     def end_session(self, session_hash: str, task_type: str = "") -> None:
@@ -135,7 +141,9 @@ class Database:
             return None
 
     # ---- messages ----
-    def insert_message(self, session_id: int, role: str, content: str, parent_msg_id: Optional[int] = None) -> Optional[int]:
+    def insert_message(
+        self, session_id: int, role: str, content: str, parent_msg_id: Optional[int] = None
+    ) -> Optional[int]:
         try:
             conn = self._get_conn()
             cur = conn.execute(
@@ -166,7 +174,16 @@ class Database:
             conn = self._get_conn()
             conn.execute(
                 "INSERT INTO tool_calls (session_id, message_id, skill_name, inputs_json, outputs_json, latency_ms, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                (session_id, message_id, skill_name, inputs_json, outputs_json, latency_ms, status, _now_iso()),
+                (
+                    session_id,
+                    message_id,
+                    skill_name,
+                    inputs_json,
+                    outputs_json,
+                    latency_ms,
+                    status,
+                    _now_iso(),
+                ),
             )
             conn.commit()
             conn.close()
@@ -174,7 +191,9 @@ class Database:
             logger.exception("insert_tool_call 失败")
 
     # ---- traces ----
-    def insert_trace(self, session_id: int, session_hash: str, event_type: str, payload: Any = None) -> None:
+    def insert_trace(
+        self, session_id: int, session_hash: str, event_type: str, payload: Any = None
+    ) -> None:
         try:
             payload_str = json.dumps(payload, ensure_ascii=False, default=str) if payload else "{}"
             conn = self._get_conn()

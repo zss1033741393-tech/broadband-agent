@@ -187,11 +187,28 @@ class Tracer:
 
     # ─── 工具调用 ────────────────────────────────────────────────────
 
-    def tool_invoke(self, skill_name: str, inputs: Any, *, agent: str = "", is_leader: bool = False) -> None:
-        self.trace("tool_invoke", {"skill": skill_name, "inputs": inputs}, agent=agent, is_leader=is_leader)
+    def tool_invoke(
+        self, skill_name: str, inputs: Any, *, agent: str = "", is_leader: bool = False
+    ) -> None:
+        self.trace(
+            "tool_invoke", {"skill": skill_name, "inputs": inputs}, agent=agent, is_leader=is_leader
+        )
 
-    def tool_result(self, skill_name: str, outputs: Any, latency_ms: int = 0, *, agent: str = "", is_leader: bool = False) -> None:
-        self.trace("tool_result", {"skill": skill_name, "outputs": outputs, "latency_ms": latency_ms}, agent=agent, is_leader=is_leader)
+    def tool_result(
+        self,
+        skill_name: str,
+        outputs: Any,
+        latency_ms: int = 0,
+        *,
+        agent: str = "",
+        is_leader: bool = False,
+    ) -> None:
+        self.trace(
+            "tool_result",
+            {"skill": skill_name, "outputs": outputs, "latency_ms": latency_ms},
+            agent=agent,
+            is_leader=is_leader,
+        )
 
     # ─── SubAgent 交互 ──────────────────────────────────────────────
 
@@ -205,7 +222,9 @@ class Tracer:
 
     # ─── 错误 / 未处理事件 ──────────────────────────────────────────
 
-    def unhandled_event(self, event_type: str, source_id: str = "", is_leader: bool = False) -> None:
+    def unhandled_event(
+        self, event_type: str, source_id: str = "", is_leader: bool = False
+    ) -> None:
         """记录未处理的事件类型（用于调试缺失事件）。"""
         self.trace(
             "unhandled_event",

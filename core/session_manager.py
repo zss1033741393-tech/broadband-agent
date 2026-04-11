@@ -4,12 +4,11 @@
 Team 由 1 leader (Orchestrator) + 5 member SubAgent 组成。
 """
 
-from dataclasses import dataclass, field
-from typing import Any, Dict, Optional
-
-from loguru import logger
+from dataclasses import dataclass
+from typing import Dict, Optional
 
 from agno.team import Team
+from loguru import logger
 
 from core.agent_factory import create_team
 from core.model_loader import inject_prompt_tracer
