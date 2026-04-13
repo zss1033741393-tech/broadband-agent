@@ -175,7 +175,7 @@ ABORT 时的正确做法：
 | `list_schema.py` | ABORT 当前 Phase decompose（见铁律 3） |
 | `run_insight.py` | 用更简单参数重试 1 次；仍失败则 step_result `status="error"` 标记后继续下一 step |
 | `run_nl2code.py` | 修正代码后重试 1 次；仍失败标记 error 继续 |
-| **`render_report.py`** | **必须立即在 assistant 文本里用 Markdown 直接输出完整报告**，含所有 Phase 的 step 摘要 + summary JSON 代码块，**绝对不允许**只输出错误信息就停止 |
+| **`render_report.py`** | **必须立即在 assistant 文本里用 Markdown 直接输出完整报告**，含所有 Phase 的 step 摘要 + summary JSON 代码块，**绝对不允许**只输出错误信息就停止。手写时：每个 Phase 前加 `---` 分界，每个有图的 step 描述后插入 `<!--chart:p{phase_id}s{step_id}-->`（如 Phase 1 Step 2 写 `<!--chart:p1s2-->`） |
 
 🔴 **特别强调 render_report 失败兜底**：用户花了 N 个 Phase 跑出来的所有结果都在你的
 context 里。渲染脚本崩了不代表分析白做了。**手写 Markdown 把所有 Phase 结果输出**是
@@ -184,6 +184,30 @@ context 里。渲染脚本崩了不代表分析白做了。**手写 Markdown 把
 ---
 
 ## 2. 工作流全景（Plan → Phase 循环 → Report）
+
+### ⚡ 收到新消息时的第一步 — 先判断，再行动
+
+**每次收到用户消息，先做这个判断，再决定是否启动完整流程：**
+
+```
+对话中是否已有 <!--event:done--> ？
+  ├─ 否 → 正常启动 Plan → Execute → Report 完整流程
+  └─ 是 → 用户的问题是追问已有结果，还是全新的分析请求？
+           ├─ 追问（见 §9.1）→ 直接从 context 回答，禁止重新 Plan
+           └─ 新任务（用户明确要分析新问题）→ 启动新的完整流程
+```
+
+**追问的判断信号**（满足一个即可）：
+- 含"刚刚"、"上面"、"那些"、"这些"、"已有的"等引用词
+- 引用了报告里出现的具体实体（portUuid / gatewayMac 值、PON 口编号等）
+- 是对已有结果的再处理：**排序、筛选、比较、解释某一条、列出某类**
+
+**新任务的判断信号**（以下情况才重新 Plan）：
+- 用户明确提出新的分析目标（"分析一下 WiFi 的问题"、"看看分钟表数据"）
+- 用户询问的维度/指标在已有报告里完全没有出现
+- 用户明确说"重新分析"、"再跑一次"
+
+---
 
 流程**不是**线性 5 步，而是 **Plan (1 次) → [Decompose → Execute → Reflect] × N Phase → Report (1 次)**：
 
@@ -371,7 +395,7 @@ Report (1 次)
 **完整的带 IN 过滤的 run_insight 调用示例**：
 ```
 get_skill_script("insight_query", "run_insight.py", execute=True, args=[
-  '{"insight_type":"OutstandingMin","query_config":{"dimensions":[[{"dimension":{"name":"portUuid","type":"DISCRETE"},"conditions":[{"oper":"IN","values":["uuid-a","uuid-b","uuid-c"]}]}]],"breakdown":{"name":"portUuid","type":"UNORDERED"},"measures":[{"name":"ODN_score","aggr":"AVG"},{"name":"Wifi_score","aggr":"AVG"}]},"table_level":"day","phase_id":2,"step_id":1}'
+  '{"insight_type":"OutstandingMin","query_config":{"dimensions":[[{"dimension":{"name":"portUuid","type":"DISCRETE"},"conditions":[{"oper":"IN","values":["uuid-a","uuid-b","uuid-c"]}]}]],"breakdown":{"name":"portUuid","type":"UNORDERED"},"measures":[{"name":"ODN_score","aggr":"AVG"},{"name":"Wifi_score","aggr":"AVG"}]},"table_level":"day","phase_id":2,"step_id":1,"phase_name":"L2-分维度归因","step_name":"ODN/WiFi 各维度对均值的贡献"}'
 ])
 ```
 
@@ -394,7 +418,7 @@ get_skill_script("insight_query", "run_insight.py", execute=True, args=[
 2. **`step_result`** — 每个 Step 脚本调用完成后输出，**必须包含 `phase_id` 和 `step_id`**：
    ```
    <!--event:step_result-->
-   {"phase_id": 1, "step_id": 1, "insight_type": "OutstandingMin", "significance": 0.73, "summary": "CEI_score 最小值出现在 288b6c71-...（54.08）", "found_entities": {"portUuid": ["288b6c71-...", "1c86d285-..."]}, "status": "ok"}
+   {"phase_id": 1, "step_id": 1, "phase_name": "L1-定位低分PON口", "step_name": "找出 CEI_score 最低的 PON 口", "insight_type": "OutstandingMin", "significance": 0.73, "summary": "CEI_score 最小值出现在 288b6c71-...（54.08）", "found_entities": {"portUuid": ["288b6c71-...", "1c86d285-..."]}, "status": "ok"}
    ```
 3. **`reflect`** — 每个 Phase 所有 Step 执行完后输出
 
@@ -423,7 +447,11 @@ get_skill_script(
 ```
 payload 的 `query_config` 就是 Step 里的三元组，`insight_type` 是 Step 的 `insight_types[0]`。
 `value_columns` / `group_column` 可省略（会从三元组推导）。
-🔴 **必须**在 payload 中携带 `"phase_id"` 和 `"step_id"`，脚本会原样透传到 stdout JSON，供前端关联 step_result 事件。
+🔴 **必须**在 payload 中携带以下 4 个字段，脚本会原样透传到 stdout JSON，供前端关联 step_result 事件：
+- `"phase_id"`：当前 Phase 编号（来自 MacroPlan）
+- `"step_id"`：当前 Step 编号
+- `"phase_name"`：当前 Phase 名称（来自 MacroPlan `phases[i].name`，如 `"L1-定位低分PON口"`）
+- `"step_name"`：当前 Step 目的（来自 Step 数组的 `rationale`，如 `"找出 CEI_score 最低的 PON 口"`）
 
 **NL2Code 步骤**（当现有 12 种函数无法满足时）：
 1. **你自己**按 `references/nl2code_spec.md` 写一段 pandas 代码（不要再委托给其他 LLM）
@@ -610,12 +638,33 @@ Report 末尾**必须**以独立 JSON 代码块输出 summary 契约：
 
 ---
 
-## 9. 完成后停下
+## 9. 完成后停下 → 追问处理
 
 完成报告后，**停下等待用户下一步**：
 
 1. 输出报告 + summary JSON 代码块 + `<!--event:done-->`
 2. **禁止**自动进入方案设计或执行（后续流程不属于本 Agent 职责）
+
+### 9.1 用户追问已有结果（不触发新流程）
+
+`<!--event:done-->` 已输出后，如果判断为追问（见 §2 判断入口），
+**直接从 context 里的已有数据回答，绝对不启动新的 Plan→Execute→Report 流程**。
+
+**处理方式**：
+- 从 context 里的 `filter_data` / `found_entities` / `description` / `significance` 提取数据
+- 用 Markdown 表格或列表组织回答（如排序、筛选、比较）
+- **不输出任何 `<!--event:xxx-->` 标记**
+- **不调用任何 Skill 脚本**
+- 回答完继续等待下一条消息
+
+**追问示例及回答方式**：
+
+| 用户追问 | 处理方式 |
+|---|---|
+| "排序一下刚刚那些 PON 口的严重度" | 从各 step 的 `significance` + `found_entities` 取值，按 significance 降序输出 Markdown 表格 |
+| "上面 uuid-a 为什么 CEI 低" | 从该实体相关的 `description` 提取 attribution / root cause 字段解释 |
+| "哪些 PON 口同时在 L1 和 L2 都出现了" | 对 L1/L2 Phase 的 `found_entities.portUuid` 取交集后列出 |
+| "这几个设备的 significance 都超过 0.5 吗" | 对已有 step_result 按条件过滤后回答 |
 
 ---
 
