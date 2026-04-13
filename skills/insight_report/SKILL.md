@@ -35,6 +35,12 @@ context JSON 格式见 `references/output_schema.md`。
 - 关键发现总结
 - 结构化交接契约 JSON
 
+手写时遵循以下格式约定：
+- 每个 Phase 前加 `---` 横线分界
+- 每个有图的 step 描述后插入图表占位符 `<!--chart:p{phase_id}s{step_id}-->`
+  例：Phase 1 Step 2 → `<!--chart:p1s2-->`
+  前端通过此占位符映射对应的 `chart_configs` 并渲染图表
+
 ### Report 阶段输出清单（3 样，不多不少）
 
 1. **`render_report.py` stdout**（Markdown 报告，通过 ToolCallCompleted 自动展示）

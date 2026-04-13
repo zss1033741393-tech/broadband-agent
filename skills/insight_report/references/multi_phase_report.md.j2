@@ -28,6 +28,9 @@
 ## 分析路径
 
 {% for phase in phases %}
+
+---
+
 ### Phase {{ phase.phase_id }} — {{ phase.name }}
 
 **里程碑**: {{ phase.milestone }}
@@ -55,6 +58,9 @@
 {% endif %}
 {% if step.fix_warnings %}
 - *字段修复警告*: {{ step.fix_warnings | join("; ") }}
+{% endif %}
+{% if step.chart_configs %}
+<!--chart:p{{ phase.phase_id }}s{{ step.step_id }}-->
 {% endif %}
 
 {% endfor %}
