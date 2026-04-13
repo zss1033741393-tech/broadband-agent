@@ -618,13 +618,20 @@ def _emit_insight_render(
             "conclusion": conclusion,
             "echartsOption": echarts,
         }
-        # 附带 phase_id / step_id 供前端分组；字段可选，前端若不消费无影响
+        # 附带 phase_id / step_id / phase_name / step_name 供前端分组与可读标签
+        # 字段全部可选（insight_query 脚本按需透传），前端不消费时无影响
         phase_id = parsed.get("phase_id")
         step_id = parsed.get("step_id")
+        phase_name = parsed.get("phase_name")
+        step_name = parsed.get("step_name")
         if phase_id is not None:
             chart_item["phaseId"] = phase_id
         if step_id is not None:
             chart_item["stepId"] = step_id
+        if phase_name:
+            chart_item["phaseName"] = str(phase_name)
+        if step_name:
+            chart_item["stepName"] = str(step_name)
         return [{
             "renderType": "insight",
             "renderData": {
