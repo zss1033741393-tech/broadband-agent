@@ -21,6 +21,168 @@
 
 ---
 
+## 0. 调用约定铁律（违反 = 立即失败，零容忍）
+
+本节 6 条规则是所有 Skill 调用的**绝对前提**。**优先级高于本文档所有其他章节**——
+后面所有阶段的细节都建立在这 6 条之上。任何违反都会导致工具调用失败、前端渲染错误，
+或整个洞察任务前功尽弃。
+
+### 铁律 1 · args 必须是 Python list，禁止字符串包裹
+
+agno 的 `get_skill_script` 用 Pydantic 强校验 `args` 类型为 `List[str]`。所有 payload JSON
+必须**作为 list 的元素**传入，**不能把 list 整体序列化成 string**。
+
+✅ **正确**（args 是 Python 列表，里面一个 string 元素，元素内容是 JSON）：
+```
+get_skill_script(
+    "insight_query",
+    "run_insight.py",
+    execute=True,
+    args=['{"insight_type": "OutstandingMin", "query_config": {...}, "table_level": "day"}']
+)
+```
+
+❌ **错误 1**（list 整体被字符串包裹 — **最常踩的坑**）：
+```
+args='["{\"insight_type\":\"OutstandingMin\"...}"]'
+      ↑                                              ↑
+      最外层多了引号，args 变成了 str 不是 list
+```
+
+❌ **错误 2**（多套了一层 JSON 编码）：
+```
+args=['"{\"insight_type\":...}"']
+       ↑                        ↑
+       string 元素被 JSON 编码了第二次
+```
+
+**如果你看到这个 Pydantic 错误，就是你犯了铁律 1**：
+```
+1 validation error for Skills._get_skill_script
+args  Input should be a valid list [type=list_type, input_value='["...', input_type=str]
+```
+
+**正确构造步骤**（按这个流程走，不要跳）：
+1. 心里构造 Python dict：`payload = {"insight_type": "OutstandingMin", ...}`
+2. 把 dict 序列化成 ONE string：`payload_str = json.dumps(payload)`
+3. 把 string 作为 list 的唯一元素：`args = [payload_str]`
+4. **不要再对 args 整体做任何序列化**
+
+### 铁律 2 · insight_type 必须从下面 12 个白名单中选
+
+`run_insight.py` 的 `insight_type` 参数**只接受**这 12 个值，其他任何值都会被
+ce_insight_core 的 INSIGHT_MAP 拒绝并返回 `significance=0` + 错误描述。
+
+| 类别 | insight_type | 速记 |
+|---|---|---|
+| 排序对比 | `OutstandingMin` | 找最低的 group |
+| | `OutstandingMax` | 找最高的 group |
+| | `OutstandingTop2` | 找前两名 |
+| 时序 | `Trend` | 上升/下降趋势 |
+| | `Seasonality` | 周期性 |
+| | `ChangePoint` | 变点检测 |
+| 分布 | `OutlierDetection` | 异常点检测 |
+| | `Evenness` | 均匀度（基尼系数） |
+| 关系 | `Correlation` | 两指标相关（**正好 2** measures） |
+| | `CrossMeasureCorrelation` | 多指标相关（**≥ 3** measures） |
+| | `Clustering` | KMeans 聚类 |
+| 归因 | `Attribution` | 各 group 对均值的贡献 |
+
+❌ **禁止发明任何不在此列表的 insight_type**。常见错误：`Distribution`、`Comparison`、
+`Statistics`、`TopN`、`Aggregate` — 全部不存在，全部会被拒。
+
+如果用户的需求**这 12 个都满足不了**，必须用 `insight_nl2code` skill 自己写 pandas 代码
+兜底，**不要造一个 insight_type 名字让脚本去识别** — 脚本不认识就直接错。
+
+详细 measures 数量约束、最小数据量、显著性公式见
+`insight_decompose/references/insight_catalog.md`。
+
+### 铁律 3 · list_schema 失败时必须 ABORT，禁止瞎猜字段
+
+调用 `list_schema.py` 后判断结果：
+- 返回 `status="ok"` 且 `all_fields` 非空 → 正常使用真实字段名
+- 返回 `status="error"` / 脚本崩溃 / `all_fields=[]` → **立即 ABORT 当前 Phase 的 decompose**
+
+ABORT 时的正确做法：
+1. 不要再调任何 `run_insight` / `run_nl2code`
+2. 输出一个 `<!--event:reflect-->` 事件，`choice="D"`，`reason="schema 查询失败，跳过本 Phase"`
+3. 跳到下一个 Phase，或如果是最后一个 Phase 则进入 Report 阶段
+
+❌ **禁止行为**：
+- "我可以根据天表 schema 推断分钟表的字段" — 字段名完全不同，**必崩**
+- "我猜分钟表有 hour / time / minute 这种字段" — 不存在，会触发 query_fixer 错误兜底，
+  把你的 breakdown 换成 portUuid，结果完全错误
+- 复用上一个 Phase 的字段名当下一个 Phase 的字段
+
+### 铁律 4 · dimensions 必须用标准三元组格式
+
+参与下钻 / 过滤的 `query_config.dimensions` 字段**只接受**这一种格式：
+
+```json
+"dimensions": [[
+  {
+    "dimension": {"name": "portUuid", "type": "DISCRETE"},
+    "conditions": [{"oper": "IN", "values": ["uuid-a", "uuid-b"]}]
+  }
+]]
+```
+
+❌ 以下"简写格式"全部**不被支持**，会被 fix_query_config 静默清空为 `[[]]`，导致过滤
+完全失效：
+```json
+"dimensions": [["portUuid", "IN", ["uuid-a"]]]
+"dimensions": [{"name": "portUuid", "oper": "IN", "values": [...]}]
+"dimensions": ["portUuid:IN:uuid-a"]
+```
+
+**判断过滤是否生效**：调脚本后看 `data_shape`。如果行数和全量数据一样多（如 3857 行），
+说明过滤失效，回去检查 dimensions 格式。
+
+无下钻需求时直接用 `"dimensions": [[]]`（空列表，**不是** `[]` 或 `null`）。
+
+### 铁律 5 · 事件 marker 后只跟一句话指针，禁止重复表格
+
+`<!--event:xxx-->` JSON 会被前端**自动渲染为结构化表格**。输出事件后**只允许**跟一句话
+进展指针描述当前状态，**禁止**再手写 Markdown 表格、列表或任何重复展示同一数据的内容。
+
+✅ 正确：
+```
+<!--event:decompose_result-->
+{"phase_id": 1, "total_steps": 3, ...}
+
+现在开始执行 Phase 1 ...
+```
+
+❌ 错误（前端会渲染两次同一份数据）：
+```
+<!--event:decompose_result-->
+{"phase_id": 1, "total_steps": 3, ...}
+
+## 📊 步骤分解完成
+| 步骤 | 类型 | 目的 |
+|---|---|---|
+| Step 1 | OutstandingMin | 找最低 |
+...
+```
+
+### 铁律 6 · 脚本调用失败 ≠ 任务失败，必须按表兜底
+
+脚本调用失败（Pydantic 校验错 / `status="error"` / 脚本崩溃）时，**禁止直接停止任务**。
+每种失败有特定的兜底动作：
+
+| 失败的脚本 | 兜底动作 |
+|---|---|
+| `list_schema.py` | ABORT 当前 Phase decompose（见铁律 3） |
+| `run_insight.py` | 用更简单参数重试 1 次；仍失败则 step_result `status="error"` 标记后继续下一 step |
+| `run_nl2code.py` | 修正代码后重试 1 次；仍失败标记 error 继续 |
+| **`render_report.py`** | **必须立即在 assistant 文本里用 Markdown 直接输出完整报告**，含所有 Phase 的 step 摘要 + summary JSON 代码块，**绝对不允许**只输出错误信息就停止 |
+
+🔴 **特别强调 render_report 失败兜底**：用户花了 N 个 Phase 跑出来的所有结果都在你的
+context 里。渲染脚本崩了不代表分析白做了。**手写 Markdown 把所有 Phase 结果输出**是
+你最后的责任。
+
+---
+
 ## 2. 工作流全景（Plan → Phase 循环 → Report）
 
 流程**不是**线性 5 步，而是 **Plan (1 次) → [Decompose → Execute → Reflect] × N Phase → Report (1 次)**：
@@ -125,6 +287,12 @@ Report (1 次)
    ```
    返回的 `schema_markdown` 会列出该维度的所有细化字段与 8 个得分字段。
 
+   🔴 **schema 查询失败处理**（按 §0 铁律 3 执行）：
+   - `status="ok"` 且 `all_fields` 非空 → 继续下一步
+   - `status="error"` / 脚本崩溃 / `all_fields=[]` → **立即 ABORT 本 Phase decompose**，
+     输出 `<!--event:reflect-->` `choice="D"` 跳过本 Phase，进入下一 Phase 或 Report
+   - **禁止**根据天表字段推断分钟表字段，**禁止**发明 `hour` / `time` 等不存在的字段名
+
 2. **加载洞察规则** → `get_skill_instructions("insight_decompose")` 后按需读：
    - `references/insight_catalog.md` — measures 数量约束 + 触发规则
    - `references/triple_schema.md` — 三元组硬约束
@@ -192,18 +360,31 @@ Report (1 次)
 
 ## 5. 阶段 3 — Execute
 
-### 下钻过滤：构造 payload 时的 dimensions 格式
+### 调用前必读
 
-当需要基于 Phase 1 发现的 `found_entities` 做下钻查询时，payload 中的 `query_config.dimensions` **必须** 使用标准三元组格式。
+执行任何 step 之前，请先在心里确认这 3 件事，每一件都对应 §0 的一条铁律：
+
+1. **`args` 是 Python list 不是 string**（铁律 1）— 最常踩的坑
+2. **`insight_type` 在 12 个白名单内**（铁律 2）— 不要发明 `Distribution` / `TopN` 等
+3. **`dimensions` 用标准三元组格式**（铁律 4）— 简写格式会被静默清空
 
 **完整的带 IN 过滤的 run_insight 调用示例**：
 ```
 get_skill_script("insight_query", "run_insight.py", execute=True, args=[
-  '{"insight_type":"OutstandingMin","query_config":{"dimensions":[[{"dimension":{"name":"portUuid","type":"DISCRETE"},"conditions":[{"oper":"IN","values":["uuid-a","uuid-b","uuid-c"]}]}]],"breakdown":{"name":"portUuid","type":"UNORDERED"},"measures":[{"name":"ODN_score","aggr":"AVG"},{"name":"Wifi_score","aggr":"AVG"}]},"table_level":"day"}'
+  '{"insight_type":"OutstandingMin","query_config":{"dimensions":[[{"dimension":{"name":"portUuid","type":"DISCRETE"},"conditions":[{"oper":"IN","values":["uuid-a","uuid-b","uuid-c"]}]}]],"breakdown":{"name":"portUuid","type":"UNORDERED"},"measures":[{"name":"ODN_score","aggr":"AVG"},{"name":"Wifi_score","aggr":"AVG"}]},"table_level":"day","phase_id":2,"step_id":1}'
 ])
 ```
 
-🔴 **切记**：`dimensions` 格式错误是最常见的导致下钻失效的原因。如果你看到返回的 `data_shape` 行数跟全量数据一样多（如 3857 行），说明过滤没有生效，请检查 dimensions 格式。
+注意 `args` 是 **Python 列表**字面量 `[...]`（不是 `'[...]'` 字符串包裹），里面**一个**字符串元素，元素内容是 JSON。
+
+### 时序函数（Trend / Seasonality / ChangePoint）特殊约束
+
+这三个时序函数在 vendor 内部只用 `value_columns[0]`，**多余的 measures 会被静默丢弃**。
+另外它们对 `breakdown` 字段有严格要求：
+
+- **`breakdown.name` 必须是 `list_schema` 实际返回的时间字段**（如 `time_id` / `hour_id` / `date` 等，具体看 schema），**不能凭空发明 `hour` 这种字段名**——会被 query_fixer 错误替换成 portUuid，导致 ChangePoint 把 UUID 当时间序列分析，结果完全是垃圾
+- **`breakdown.type` 必须是 `ORDERED`**（不是 `UNORDERED`）
+- **想分析多个指标的时序趋势** → 拆成多个 step，每个 step 一个 measure；不要在一个 step 里塞多个 measures
 
 ### 🔴 事件输出（强制，不可跳过）
 
@@ -303,6 +484,12 @@ payload 的 `query_config` 就是 Step 里的三元组，`insight_type` 是 Step
 ---
 
 ## 7. 阶段 5 — Report
+
+🔴 **本阶段失败兜底是头号优先级**（按 §0 铁律 6 执行）：用户花了 N 个 Phase 跑出来的所有
+分析结果都在你的 context 里。如果 `render_report.py` 调用失败（Pydantic 校验错 / args 类型错
+/ 脚本崩溃），**绝对不允许**只输出错误信息就停止。**必须**立即在 assistant 文本里用 Markdown
+直接输出**完整报告**，包含：所有 Phase 的 step 摘要表、关键发现、`<!--event:done-->` 事件、
+summary JSON 代码块。**渲染脚本崩了不代表分析白做了**。
 
 ### 流程
 
