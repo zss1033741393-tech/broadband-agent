@@ -11,16 +11,16 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from loguru import logger
 
+from api import repository as repo
+from api.agent_bridge import get_event_stream
+from api.event_adapter import MessageAggregate, adapt
 from api.models import (
     ApiResponse,
     MessageListData,
     SendMessageRequest,
-    ok,
     err,
+    ok,
 )
-from api import repository as repo
-from api.agent_bridge import get_event_stream
-from api.event_adapter import adapt, MessageAggregate
 
 router = APIRouter(prefix="/conversations/{conv_id}/messages", tags=["messages"])
 
@@ -98,10 +98,13 @@ async def send_message(conv_id: str, body: SendMessageRequest):
                         thinking_duration_sec=agg.thinking_duration_sec,
                         steps=steps_data,
                         render_blocks=agg.render_blocks,
+                        insight_events=agg.insight_events,
                         status=agg.status,
                     )
                     _api_log.bind(conv_id=conv_id, msg_id=agg.message_id).info(
-                        f"assistant 消息已落库 content_len={len(agg.content)} steps={len(steps_data)}"
+                        f"assistant 消息已落库 content_len={len(agg.content)} "
+                        f"steps={len(steps_data)} insight_events={len(agg.insight_events)} "
+                        f"renders={len(agg.render_blocks)}"
                     )
                 except Exception:
                     _api_log.exception("assistant 消息落库失败")

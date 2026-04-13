@@ -6,11 +6,17 @@
 
 M2 范围：thinking / text / done / error
 M3 范围：step_start / sub_step / step_end（已实现，与 M2 共存）
-M4 补充：render
+M4 补充：render（含 insight / image 两类）
+M5 补充：insight_plan / insight_decompose / insight_phase_start /
+         insight_step_result / insight_reflect / insight_summary
+         —— 捕获 InsightAgent assistant 文本中的 <!--event:xxx--> 标记，
+            解析成结构化 SSE 事件；图表改为每次 insight_query 完成即发 render。
 """
 
 from __future__ import annotations
 
+import json
+import re
 import shutil
 import time
 import uuid
@@ -22,7 +28,6 @@ from typing import Any, AsyncGenerator, Optional
 from loguru import logger
 
 from api.sse import format_sse
-
 
 # 图片持久化目录 — 与 api/routes/images.py 的 _IMAGES_DIR 指向同一处
 # 事件适配层拷贝 skill 产物到这里，images 路由按 imageId 直接 FileResponse
@@ -39,13 +44,6 @@ class StepAggregate:
 
 
 @dataclass
-class InsightAccumulator:
-    """在 insight step 内累积图表和报告，step_end 时一次性发 render。"""
-    charts: list = field(default_factory=list)   # List[ChartItem dict]
-    markdown_report: str = ""
-
-
-@dataclass
 class MessageAggregate:
     message_id: str
     conversation_id: str
@@ -54,6 +52,9 @@ class MessageAggregate:
     thinking_duration_sec: int = 0
     steps: list[StepAggregate] = field(default_factory=list)
     render_blocks: list = field(default_factory=list)
+    # InsightAgent 5 类阶段事件（按到达顺序），用于持久化回放
+    # 每项形如 {"event": "insight_plan", "data": {...}}
+    insight_events: list = field(default_factory=list)
     status: str = "streaming"
     error_message: str = ""
 
@@ -136,7 +137,8 @@ async def _adapt_body(
     skill_start_times: dict[str, list] = {}
     skill_start_args: dict[str, list] = {}   # key -> [call_args, ...]
     active_step: Optional[StepAggregate] = None
-    insight_acc: Optional[InsightAccumulator] = None  # 仅 insight step 期间非 None
+    # insight step 期间的 marker 解析器（独立状态机，step 结束时 flush 丢弃尾残）
+    insight_parser: Optional[_InsightMarkerParser] = None
 
     try:
         async for event in raw_stream:
@@ -178,6 +180,41 @@ async def _adapt_body(
                     yield format_sse("text", {"delta": str(c_delta)}), agg
                 continue
 
+            # ── member content：InsightAgent 专属，解析 <!--event:xxx--> 标记 ──
+            # 其它 member 的 content 暂不处理（沿用原丢弃策略，避免范围蔓延）
+            if (
+                etype == "RunContent"
+                and not leader
+                and insight_parser is not None
+                and active_step is not None
+                and active_step.step_id == "insight"
+            ):
+                c_delta = getattr(event, "content", None)
+                if c_delta:
+                    for kind, payload in insight_parser.feed(str(c_delta)):
+                        if kind == "event":
+                            sse_event = _MARKER_TO_SSE_EVENT.get(payload["type"])
+                            if not sse_event:
+                                continue
+                            evt_data = {"stepId": "insight", **payload["data"]}
+                            agg.insight_events.append(
+                                {"event": sse_event, "data": evt_data}
+                            )
+                            yield format_sse(sse_event, evt_data), agg
+                        elif kind == "narrative":
+                            text = str(payload)
+                            if not text.strip():
+                                continue
+                            if thinking_start is None:
+                                thinking_start = time.monotonic()
+                            thinking_end = time.monotonic()
+                            agg.thinking_content += text
+                            yield format_sse(
+                                "thinking",
+                                {"delta": text, "stepId": "insight"},
+                            ), agg
+                continue
+
             # ── step_start ────────────────────────────────────────────────
             if etype == "ToolCallStarted" and leader and tname == "delegate_task_to_member":
                 args = _tool_args(event)
@@ -187,9 +224,9 @@ async def _adapt_body(
                 title = _MEMBER_DISPLAY_NAMES[member_id]
                 active_step = StepAggregate(step_id=member_id, title=title)
                 agg.steps.append(active_step)
-                # insight step 开始时初始化累积器
+                # insight step 开始时初始化 marker 解析器
                 if member_id == "insight":
-                    insight_acc = InsightAccumulator()
+                    insight_parser = _InsightMarkerParser()
                 yield format_sse("step_start", {"stepId": member_id, "title": title}), agg
                 continue
 
@@ -248,16 +285,19 @@ async def _adapt_body(
                 if active_step:
                     active_step.sub_steps.append(sub)
 
-                # M4：insight 场景累积图表/报告
-                if insight_acc is not None:
-                    _accumulate_insight(insight_acc, skill_name, result_raw, sub_step_id)
-
                 yield format_sse("sub_step", {"stepId": step_id, **sub}), agg
 
                 # wifi_simulation 单独通道：解析 image_paths，拷贝到 data/images/
                 # 每张图发一个独立的 renderType="image" 事件（按 docs/sse-interface-spec.md:216）
                 if skill_name == "wifi_simulation":
                     for rb in _emit_wifi_image_renders(agg.message_id, result_raw):
+                        agg.render_blocks.append(rb)
+                        yield format_sse("render", rb), agg
+
+                # insight 场景：每次 insight_query / insight_report 完成即发独立 render
+                # 与 wifi 图一致的渐进式节奏，对应 docs/sse-interface-spec.md §render
+                if insight_parser is not None:
+                    for rb in _emit_insight_render(skill_name, result_raw, sub_step_id):
                         agg.render_blocks.append(rb)
                         yield format_sse("render", rb), agg
 
@@ -270,14 +310,10 @@ async def _adapt_body(
                 if member_id not in _MEMBER_DISPLAY_NAMES:
                     continue
 
-                # M4：insight step 结束时，若有累积数据则发 render
-                if member_id == "insight" and insight_acc is not None:
-                    render_data = _build_insight_render(insight_acc)
-                    if render_data:
-                        rb = {"renderType": "insight", "renderData": render_data}
-                        agg.render_blocks.append(rb)
-                        yield format_sse("render", rb), agg
-                    insight_acc = None
+                # insight step 结束：清理 marker 解析器（flush 的尾残不再对外推送）
+                if member_id == "insight" and insight_parser is not None:
+                    insight_parser.flush()
+                    insight_parser = None
 
                 active_step = None
                 yield format_sse("step_end", {"stepId": member_id}), agg
@@ -363,55 +399,69 @@ def _parse_stdout(raw: Any) -> Any:
         return stdout  # 返回原始字符串（如 Markdown）
 
 
-def _accumulate_insight(
-    acc: InsightAccumulator,
+def _emit_insight_render(
     skill_name: str,
     result_raw: Any,
     sub_step_id: str,
-) -> None:
-    """解析 skill stdout，将图表或报告累积到 InsightAccumulator。
+) -> list[dict]:
+    """为 insight step 内某个 skill 调用产出 renderBlock 列表（0 或 1 条）。
 
-    新 InsightAgent 使用的 skill 名：
-      - insight_query   → JSON stdout，含 chart_configs（ECharts option）
-      - insight_report  → Markdown stdout
-    其余 skill（insight_plan / insight_decompose / insight_nl2code / insight_reflect）
-    不产出可视化内容，跳过。
+    渐进式推送规则（与 docs/sse-interface-spec.md §render 对齐）：
+      - insight_query  → 从 stdout.chart_configs 取 ECharts option，包成单图 render
+      - insight_report → 从 stdout 取 Markdown，包成仅含 markdownReport 的 render
+      - 其它 skill     → 返回空列表
     """
     parsed = _parse_stdout(result_raw)
     if parsed is None:
-        return
+        return []
 
     if skill_name == "insight_query" and isinstance(parsed, dict):
         echarts = parsed.get("chart_configs")
         if not echarts:
-            return
-
+            return []
         description = parsed.get("description", "")
         significance = parsed.get("significance", 0.0)
-
-        # title 优先取 chart_configs.title.text
         title = ""
-        ec_title = echarts.get("title", {})
+        ec_title = echarts.get("title", {}) if isinstance(echarts, dict) else {}
         if isinstance(ec_title, dict):
             title = ec_title.get("text", "")
         if not title:
             title = str(parsed.get("insight_type", "洞察分析"))
-
         conclusion = _build_insight_conclusion(description, significance)
-
-        acc.charts.append({
-            "chartId": f"{sub_step_id}_{len(acc.charts) + 1}",
+        chart_item = {
+            "chartId": f"{sub_step_id}_{int(time.time() * 1000) % 1000000}",
             "title": title,
             "conclusion": conclusion,
             "echartsOption": echarts,
-        })
+        }
+        # 附带 phase_id / step_id 供前端分组；字段可选，前端若不消费无影响
+        phase_id = parsed.get("phase_id")
+        step_id = parsed.get("step_id")
+        if phase_id is not None:
+            chart_item["phaseId"] = phase_id
+        if step_id is not None:
+            chart_item["stepId"] = step_id
+        return [{
+            "renderType": "insight",
+            "renderData": {
+                "charts": [chart_item],
+                "markdownReport": "",
+            },
+        }]
 
-    elif skill_name == "insight_report":
-        # stdout 是纯 Markdown 文本
-        if isinstance(parsed, str):
-            acc.markdown_report = parsed
-        elif isinstance(parsed, dict):
-            acc.markdown_report = str(parsed)
+    if skill_name == "insight_report":
+        markdown = parsed if isinstance(parsed, str) else str(parsed)
+        if not markdown.strip():
+            return []
+        return [{
+            "renderType": "insight",
+            "renderData": {
+                "charts": [],
+                "markdownReport": markdown,
+            },
+        }]
+
+    return []
 
 
 def _build_insight_conclusion(description: Any, significance: float) -> str:
@@ -426,14 +476,136 @@ def _build_insight_conclusion(description: Any, significance: float) -> str:
     return "；".join(parts) if parts else "洞察分析完成"
 
 
-def _build_insight_render(acc: InsightAccumulator) -> dict | None:
-    """将 InsightAccumulator 转为 render event 的 renderData。"""
-    if not acc.charts and not acc.markdown_report:
-        return None
-    return {
-        "charts": acc.charts,
-        "markdownReport": acc.markdown_report,
-    }
+# ─── InsightAgent <!--event:xxx--> 标记解析器 ────────────────────────────────
+
+# prompt 里的 marker name → SSE 事件名映射
+# done 改名 insight_summary 避免与整流终结事件 done 冲突
+_MARKER_TO_SSE_EVENT: dict[str, str] = {
+    "plan": "insight_plan",
+    "decompose_result": "insight_decompose",
+    "phase_start": "insight_phase_start",
+    "step_result": "insight_step_result",
+    "reflect": "insight_reflect",
+    "done": "insight_summary",
+}
+
+_MARKER_RE = re.compile(r"<!--event:(\w+)-->")
+
+
+class _InsightMarkerParser:
+    """流式解析 InsightAgent assistant 文本中的 <!--event:xxx--> + JSON 块。
+
+    feed(delta) → 返回 [(kind, payload), ...]：
+      - ("event", {"type": str, "data": dict}) — 命中完整 marker+JSON
+      - ("narrative", str) — 非 marker 的自然语言片段（包括 marker 之前、marker 之间）
+
+    内部维护滚动 buffer，处理跨 delta 切分：
+      - marker 标签被切（如 delta1="<!--ev", delta2="ent:plan-->...") → 保留 tail
+      - JSON 不完整 → 保留 marker 开头，等下一次 feed
+
+    flush() → 返回 buffer 残留，通常为空或少量自然语言尾巴
+    """
+
+    def __init__(self) -> None:
+        self._buf = ""
+
+    def feed(self, delta: str) -> list[tuple[str, Any]]:
+        self._buf += delta
+        out: list[tuple[str, Any]] = []
+        while True:
+            m = _MARKER_RE.search(self._buf)
+            if not m:
+                # 没找到完整 marker。切出前缀作为 narrative，保留可能是 marker 开头的尾巴
+                tail_keep = self._partial_marker_tail_len(self._buf)
+                if tail_keep == len(self._buf):
+                    return out  # buffer 整体可能是 marker 开头，全部保留
+                emit_end = len(self._buf) - tail_keep
+                if emit_end > 0:
+                    out.append(("narrative", self._buf[:emit_end]))
+                self._buf = self._buf[emit_end:]
+                return out
+
+            # 命中 marker：先 emit marker 之前的 narrative
+            if m.start() > 0:
+                out.append(("narrative", self._buf[: m.start()]))
+
+            event_type = m.group(1)
+            rest = self._buf[m.end():]
+
+            # 跳过 marker 后的空白，定位 JSON 起始 '{'
+            i = 0
+            while i < len(rest) and rest[i] in " \t\r\n":
+                i += 1
+            if i >= len(rest) or rest[i] != "{":
+                # JSON 还没到或格式不对。保留从 marker 开始的 buffer 等下次
+                self._buf = self._buf[m.start():]
+                return out
+
+            end_idx = self._find_json_end(rest, i)
+            if end_idx < 0:
+                # JSON 不完整，等下次 feed
+                self._buf = self._buf[m.start():]
+                return out
+
+            json_str = rest[i: end_idx + 1]
+            try:
+                data = json.loads(json_str)
+            except json.JSONDecodeError:
+                # JSON 坏掉，降级成 narrative（便于前端看到原文排查）
+                out.append((
+                    "narrative",
+                    self._buf[m.start(): m.end() + i + len(json_str)],
+                ))
+            else:
+                out.append(("event", {"type": event_type, "data": data}))
+
+            # 推进 buffer 到 JSON 之后
+            self._buf = rest[end_idx + 1:]
+            # 循环继续扫后续 marker
+
+    def flush(self) -> list[tuple[str, Any]]:
+        if self._buf:
+            residual, self._buf = self._buf, ""
+            return [("narrative", residual)]
+        return []
+
+    @staticmethod
+    def _partial_marker_tail_len(buf: str) -> int:
+        """若 buf 尾部可能是 '<!--event:' 的部分前缀，返回应保留的尾巴长度。"""
+        prefix = "<!--event:"
+        max_check = min(len(prefix), len(buf))
+        for n in range(max_check, 0, -1):
+            if buf.endswith(prefix[:n]):
+                return n
+        return 0
+
+    @staticmethod
+    def _find_json_end(s: str, start: int) -> int:
+        """返回 s[start] 处 '{' 对应的匹配 '}' 下标；未闭合返回 -1。"""
+        depth = 0
+        i = start
+        in_str = False
+        esc = False
+        while i < len(s):
+            c = s[i]
+            if in_str:
+                if esc:
+                    esc = False
+                elif c == "\\":
+                    esc = True
+                elif c == '"':
+                    in_str = False
+            else:
+                if c == '"':
+                    in_str = True
+                elif c == "{":
+                    depth += 1
+                elif c == "}":
+                    depth -= 1
+                    if depth == 0:
+                        return i
+            i += 1
+        return -1
 
 
 # ─── wifi_simulation 图片持久化 ───────────────────────────────────────────────

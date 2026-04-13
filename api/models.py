@@ -6,8 +6,8 @@
 from __future__ import annotations
 
 from typing import Any, List, Literal, Optional, Union
-from pydantic import BaseModel, ConfigDict
 
+from pydantic import BaseModel, ConfigDict
 
 # ─── 通用响应包装 ──────────────────────────────────────────────────────────────
 
@@ -97,6 +97,13 @@ RenderBlock = Union[InsightRenderBlock, ImageRenderBlock]
 
 # ─── 消息 ─────────────────────────────────────────────────────────────────────
 
+class InsightEvent(BaseModel):
+    """InsightAgent 阶段事件回放条目。"""
+
+    event: str  # insight_plan / insight_decompose / insight_phase_start / insight_step_result / insight_reflect / insight_summary
+    data: dict
+
+
 class Message(BaseModel):
     id: str
     conversationId: str
@@ -106,6 +113,7 @@ class Message(BaseModel):
     thinkingDurationSec: Optional[int] = None
     steps: List[Step] = []
     renderBlocks: List[RenderBlock] = []
+    insightEvents: List[InsightEvent] = []
     createdAt: str
 
 
