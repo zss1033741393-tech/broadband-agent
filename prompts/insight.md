@@ -175,7 +175,7 @@ ABORT 时的正确做法：
 | `list_schema.py` | ABORT 当前 Phase decompose（见铁律 3） |
 | `run_insight.py` | 用更简单参数重试 1 次；仍失败则 step_result `status="error"` 标记后继续下一 step |
 | `run_nl2code.py` | 修正代码后重试 1 次；仍失败标记 error 继续 |
-| **`render_report.py`** | **必须立即在 assistant 文本里用 Markdown 直接输出完整报告**，含所有 Phase 的 step 摘要 + summary JSON 代码块，**绝对不允许**只输出错误信息就停止 |
+| **`render_report.py`** | **必须立即在 assistant 文本里用 Markdown 直接输出完整报告**，含所有 Phase 的 step 摘要 + summary JSON 代码块，**绝对不允许**只输出错误信息就停止。手写时：每个 Phase 前加 `---` 分界，每个有图的 step 描述后插入 `<!--chart:p{phase_id}s{step_id}-->`（如 Phase 1 Step 2 写 `<!--chart:p1s2-->`） |
 
 🔴 **特别强调 render_report 失败兜底**：用户花了 N 个 Phase 跑出来的所有结果都在你的
 context 里。渲染脚本崩了不代表分析白做了。**手写 Markdown 把所有 Phase 结果输出**是
