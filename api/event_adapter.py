@@ -15,17 +15,21 @@ M5 说明：InsightAgent assistant 文本中的 <!--event:xxx--> 阶段标记
 
 from __future__ import annotations
 
+import json as _json
 import shutil
 import time
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, AsyncGenerator, Optional
+from typing import TYPE_CHECKING, Any, AsyncGenerator, Optional
 
 from loguru import logger
 
 from api.sse import format_sse
+
+if TYPE_CHECKING:
+    from core.observability.tracer import Tracer
 
 # 图片持久化目录 — 与 api/routes/images.py 的 _IMAGES_DIR 指向同一处
 # 事件适配层拷贝 skill 产物到这里，images 路由按 imageId 直接 FileResponse
@@ -99,11 +103,21 @@ _MEMBER_DISPLAY_NAMES: dict[str, str] = {
 async def adapt(
     conv_id: str,
     raw_stream: AsyncGenerator[Any, None],
+    tracer: Optional["Tracer"] = None,
+    db_session_id: Optional[int] = None,
+    user_msg_id: Optional[int] = None,
 ) -> AsyncGenerator[tuple[str, MessageAggregate], None]:
     """消费 agno 原始事件流，yield (SSE字符串, 当前聚合状态) 元组。
 
     外层壳：负责创建 MessageAggregate 并注入 msg_id 日志上下文；
     主循环委派给 `_adapt_body`，便于用 `with contextualize` 正确包裹。
+
+    Args:
+        conv_id: 业务会话 ID
+        raw_stream: agno team.arun 原始事件流
+        tracer: observability Tracer（缺省时不写 trace，向下兼容旧调用）
+        db_session_id: observability DB sessions 表的主键，用于关联 messages/tool_calls
+        user_msg_id: observability DB messages 表的 user 消息主键，用于关联 tool_calls
     """
     agg = MessageAggregate(
         message_id=str(uuid.uuid4()),
@@ -113,7 +127,9 @@ async def adapt(
     with logger.contextualize(msg_id=agg.message_id):
         api_log.info(f"adapt() 启动 msg_id={agg.message_id}")
         try:
-            async for item in _adapt_body(conv_id, raw_stream, agg):
+            async for item in _adapt_body(
+                conv_id, raw_stream, agg, tracer, db_session_id, user_msg_id
+            ):
                 yield item
         finally:
             api_log.info(
@@ -123,12 +139,48 @@ async def adapt(
             )
 
 
+def _source_id(event: Any, leader: bool) -> Optional[str]:
+    """从 agno 事件提取发言者标识。leader 用 team_id/team_name；member 用 agent_id/agent_name。"""
+    if leader:
+        for attr in ("team_id", "team_name"):
+            v = getattr(event, attr, None)
+            if v:
+                return str(v)
+        return None
+    for attr in ("agent_id", "agent_name"):
+        v = getattr(event, attr, None)
+        if v:
+            return str(v)
+    return None
+
+
+def _ensure_json_str(data: Any) -> str:
+    """序列化为 JSON 字符串（ensure_ascii=False），用于 sessions.db.tool_calls 落盘。"""
+    if not data:
+        return ""
+    if isinstance(data, str):
+        try:
+            parsed = _json.loads(data)
+            return _json.dumps(parsed, ensure_ascii=False, default=str)
+        except (_json.JSONDecodeError, TypeError):
+            return data
+    return _json.dumps(data, ensure_ascii=False, default=str)
+
+
 async def _adapt_body(
     conv_id: str,
     raw_stream: AsyncGenerator[Any, None],
     agg: MessageAggregate,
+    tracer: Optional["Tracer"] = None,
+    db_session_id: Optional[int] = None,
+    user_msg_id: Optional[int] = None,
 ) -> AsyncGenerator[tuple[str, MessageAggregate], None]:
-    """adapt() 的原始主循环。所有 yield 的 SSE 事件由 format_sse 写 sse.log。"""
+    """adapt() 的原始主循环。所有 yield 的 SSE 事件由 format_sse 写 sse.log。
+
+    `tracer` / `db_session_id` / `user_msg_id` 用于把事件流同步落到
+    `data/sessions.db` 的 traces / tool_calls / messages 表（与 Gradio 路径一致）；
+    任何 trace 调用失败都已被 Tracer/db 内部 try/except 吞掉，不影响 SSE 主流程。
+    """
 
     thinking_start: Optional[float] = None
     thinking_end: Optional[float] = None
@@ -136,11 +188,51 @@ async def _adapt_body(
     skill_start_args: dict[str, list] = {}   # key -> [call_args, ...]
     active_step: Optional[StepAggregate] = None
 
+    # ── trace 段级化状态 ────────────────────────────────────────────────────
+    # thinking 与 member content 都按 token 流式到达；按段（source 切换 / 工具
+    # 调用 / 流结束）一次性 flush 到 trace，避免 traces 表被 token 级写满。
+    reasoning_buffer = ""
+    reasoning_source: Optional[str] = None
+    reasoning_is_leader = False
+    member_text_buffers: dict[str, str] = {}
+
+    # 延迟导入，保证旧的不带 tracer 的调用（如冒烟测试）不会因 core 依赖失败
+    _db = None
+    if db_session_id is not None:
+        try:
+            from core.observability.db import db as _db  # noqa: PLC0415
+        except Exception:
+            _db = None
+
+    def _flush_reasoning() -> None:
+        nonlocal reasoning_buffer, reasoning_source, reasoning_is_leader
+        if reasoning_buffer and tracer is not None:
+            tracer.thinking(
+                reasoning_buffer,
+                agent=reasoning_source or "unknown",
+                is_leader=reasoning_is_leader,
+            )
+        reasoning_buffer = ""
+        reasoning_source = None
+        reasoning_is_leader = False
+
+    def _flush_member_text(member_id: str) -> None:
+        text = member_text_buffers.pop(member_id, "")
+        if not text or tracer is None:
+            return
+        tracer.member_content(member_id, text)
+        if _db is not None and db_session_id is not None:
+            _db.insert_message(
+                db_session_id, "assistant", text, parent_msg_id=user_msg_id
+            )
+
     try:
         async for event in raw_stream:
             leader = _is_leader(event)
             etype = _event_type(event)
             tname = _tool_name(event)
+            sid = _source_id(event, leader)
+            agent_name = "orchestrator" if leader else (sid or "unknown")
 
             # ── thinking ──────────────────────────────────────────────────
             if etype == "ReasoningContentDelta":
@@ -154,6 +246,12 @@ async def _adapt_body(
                     if active_step:
                         payload["stepId"] = active_step.step_id
                     yield format_sse("thinking", payload), agg
+                    # source 切换 → 旧段先 flush 再开新段
+                    if sid and sid != reasoning_source:
+                        _flush_reasoning()
+                        reasoning_source = sid
+                        reasoning_is_leader = leader
+                    reasoning_buffer += delta
                 continue
 
             if etype == "RunContent":
@@ -167,11 +265,19 @@ async def _adapt_body(
                     if active_step:
                         payload["stepId"] = active_step.step_id
                     yield format_sse("thinking", payload), agg
+                    if sid and sid != reasoning_source:
+                        _flush_reasoning()
+                        reasoning_source = sid
+                        reasoning_is_leader = leader
+                    reasoning_buffer += r_delta
 
             # ── text（仅 leader）─────────────────────────────────────────
             if etype == "RunContent" and leader:
                 c_delta = getattr(event, "content", None)
                 if c_delta:
+                    # leader 文本进入说明思考段已结束，flush 旧 thinking 段
+                    if reasoning_buffer:
+                        _flush_reasoning()
                     agg.content += str(c_delta)
                     yield format_sse("text", {"delta": str(c_delta)}), agg
                 continue
@@ -189,8 +295,13 @@ async def _adapt_body(
             ):
                 c_delta = getattr(event, "content", None)
                 if c_delta:
+                    if reasoning_buffer:
+                        _flush_reasoning()
                     text_delta = str(c_delta)
                     active_step.text_content += text_delta
+                    member_text_buffers["insight"] = (
+                        member_text_buffers.get("insight", "") + text_delta
+                    )
                     yield format_sse(
                         "text",
                         {"delta": text_delta, "stepId": "insight"},
@@ -211,6 +322,10 @@ async def _adapt_body(
 
             # ── sub_step 计时开始 ─────────────────────────────────────────
             if etype == "ToolCallStarted" and not leader and tname == "get_skill_script":
+                # 工具调用进入说明 thinking 段结束，flush 段级 trace
+                if reasoning_buffer:
+                    _flush_reasoning()
+
                 args = _tool_args(event)
                 skill_name = args.get("skill_name", "unknown")
                 agent_id = getattr(event, "agent_id", "") or ""
@@ -223,6 +338,12 @@ async def _adapt_body(
                     "scriptPath": args.get("script_path", ""),
                     "callArgs": args.get("args", []),
                 })
+
+                # ── trace: tool_invoke ────────────────────────────────
+                if tracer is not None:
+                    tracer.tool_invoke(
+                        skill_name, args, agent=agent_name, is_leader=False
+                    )
                 continue
 
             # ── sub_step 完成 ─────────────────────────────────────────────
@@ -266,6 +387,26 @@ async def _adapt_body(
 
                 yield format_sse("sub_step", {"stepId": step_id, **sub}), agg
 
+                # ── trace: tool_result + sessions.db.tool_calls ──────
+                if tracer is not None:
+                    tracer.tool_result(
+                        skill_name,
+                        result_raw,
+                        latency_ms=duration_ms,
+                        agent=agent_name,
+                        is_leader=False,
+                    )
+                if _db is not None and db_session_id is not None:
+                    _db.insert_tool_call(
+                        db_session_id,
+                        skill_name=skill_name,
+                        inputs_json=_ensure_json_str(call_info.get("callArgs", [])),
+                        outputs_json=_ensure_json_str(result_raw),
+                        latency_ms=duration_ms,
+                        status="ok",
+                        message_id=user_msg_id,
+                    )
+
                 # wifi_simulation 单独通道：解析 image_paths，拷贝到 data/images/
                 # 每张图发一个独立的 renderType="image" 事件（按 docs/sse-interface-spec.md:216）
                 if skill_name == "wifi_simulation":
@@ -293,8 +434,30 @@ async def _adapt_body(
                 yield format_sse("step_end", {"stepId": member_id}), agg
                 continue
 
+            # ── member RunCompleted：flush member text + trace.member_completed ──
+            if etype == "RunCompleted" and not leader:
+                if reasoning_buffer:
+                    _flush_reasoning()
+                if sid:
+                    _flush_member_text(sid)
+                final_content = getattr(event, "content", None)
+                if tracer is not None:
+                    tracer.member_completed(
+                        sid or "unknown",
+                        content=str(final_content) if final_content else "",
+                    )
+                continue
+
             # ── done ──────────────────────────────────────────────────────
             if etype == "RunCompleted" and leader:
+                if reasoning_buffer:
+                    _flush_reasoning()
+                # leader 终结 → trace.response + sessions.db.messages 落 assistant
+                if tracer is not None and agg.content:
+                    tracer.response(agg.content)
+                if _db is not None and db_session_id is not None and agg.content:
+                    _db.insert_message(db_session_id, "assistant", agg.content)
+
                 if thinking_start and thinking_end:
                     agg.thinking_duration_sec = int(thinking_end - thinking_start)
                 agg.status = "done"
@@ -314,6 +477,8 @@ async def _adapt_body(
                 logger.error(f"Agent RunError: type={error_type} content={content!r} additional_data={additional_data} full={event}")
                 agg.status = "error"
                 agg.error_message = msg
+                if tracer is not None:
+                    tracer.error(msg)
                 yield format_sse("error", {"message": msg}), agg
                 return
 
@@ -321,8 +486,16 @@ async def _adapt_body(
         logger.exception("event_adapter 异常")
         agg.status = "error"
         agg.error_message = str(exc)
+        if tracer is not None:
+            tracer.error(str(exc))
         yield format_sse("error", {"message": f"Agent 执行失败：{exc}"}), agg
         return
+    finally:
+        # 兜底 flush：thinking buffer 与所有 member text buffer
+        if reasoning_buffer:
+            _flush_reasoning()
+        for _mid in list(member_text_buffers.keys()):
+            _flush_member_text(_mid)
 
     # 兜底 done
     if agg.status == "streaming":

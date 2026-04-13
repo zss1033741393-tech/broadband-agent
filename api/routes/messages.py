@@ -12,7 +12,7 @@ from fastapi.responses import StreamingResponse
 from loguru import logger
 
 from api import repository as repo
-from api.agent_bridge import get_event_stream
+from api.agent_bridge import get_session_context
 from api.event_adapter import MessageAggregate, adapt
 from api.models import (
     ApiResponse,
@@ -45,19 +45,47 @@ async def send_message(conv_id: str, body: SendMessageRequest):
         _api_log.warning(f"send_message: 会话不存在 conv_id={conv_id}")
         raise HTTPException(status_code=404, detail="会话不存在")
 
-    # 先落库用户消息
+    # 先落业务库（api.db）的用户消息（前端历史回放用）
     await repo.insert_user_message(conv_id, body.content)
     _api_log.bind(conv_id=conv_id).info(
         f"send_message ← user_content_len={len(body.content)} preview={body.content[:80]!r}"
     )
 
-    # 启动 agno 流
-    raw_stream = await get_event_stream(conv_id, body.content)
+    # 取 SessionContext（含 team / tracer / observability DB session_id）
+    # tracer 在 SessionManager 创建时已向所有 model 注入 prompt 拦截器，
+    # 这里再把它沿事件流传给 adapt()，补齐 thinking/tool/member 等显式 trace。
+    ctx = get_session_context(conv_id)
+
+    # 在 observability 库（sessions.db）落 user 消息，拿到 user_msg_id 后续关联 tool_calls
+    user_msg_id = None
+    try:
+        ctx.tracer.request(body.content)
+        if ctx.db_session_id:
+            from core.observability.db import db as _obs_db
+            user_msg_id = _obs_db.insert_message(
+                ctx.db_session_id, "user", body.content
+            )
+    except Exception:
+        _api_log.exception("observability 入库 user 消息失败（不影响主流程）")
+
+    # 启动 agno 流（用 ctx.team.arun，保持与 Gradio 路径一致；不再走 get_event_stream）
+    raw_stream = ctx.team.arun(
+        body.content,
+        session_id=conv_id,
+        stream=True,
+        stream_events=True,
+    )
 
     # 包装成 SSE 生成器，完成后落库 assistant 消息
     async def sse_generator() -> AsyncGenerator[str, None]:
         agg: MessageAggregate | None = None
-        adapter = adapt(conv_id, raw_stream)
+        adapter = adapt(
+            conv_id,
+            raw_stream,
+            tracer=ctx.tracer,
+            db_session_id=ctx.db_session_id,
+            user_msg_id=user_msg_id,
+        )
         started_at = time.monotonic()
         chunk_count = 0
         # conv_id 上下文贯穿整个 SSE 流（event_adapter 内再叠加 msg_id）
