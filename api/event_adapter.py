@@ -97,9 +97,9 @@ def _tool_args(event: Any) -> dict:
 _MEMBER_DISPLAY_NAMES: dict[str, str] = {
     "planning": "PlanningAgent",
     "insight": "InsightAgent",
-    "provisioning-wifi": "ProvisioningAgent (WIFI 仿真)",
-    "provisioning-delivery": "ProvisioningAgent (差异化承载)",
-    "provisioning-cei-chain": "ProvisioningAgent (体验保障链)",
+    "provisioning_wifi": "ProvisioningAgent (WIFI 仿真)",
+    "provisioning_delivery": "ProvisioningAgent (差异化承载)",
+    "provisioning_cei_chain": "ProvisioningAgent (体验保障链)",
 }
 
 

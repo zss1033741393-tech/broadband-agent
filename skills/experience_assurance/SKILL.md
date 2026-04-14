@@ -28,11 +28,11 @@ description: "体验保障：调用 FAN 网络切片服务 app-flow/create-assur
 
 ## When to Use
 
-- ✅ 场景 1（综合目标）方案段落 `## 差异化承载方案 **启用**: true` 时 → 派发给 `provisioning-delivery` 实例执行
+- ✅ 场景 1（综合目标）方案段落 `## 差异化承载方案 **启用**: true` 时 → 派发给 `provisioning_delivery` 实例执行
 - ✅ 场景 3（单点指令）用户要求"开通切片 / 应用保障 / Appflow / 差异化承载 / 白名单" → 任务头 `[任务类型: 差异化承载开通]`
 - ❌ 用户咨询切片 / 体验保障概念（直接回答 + 引用 `references/assurance_parameters.md` 即可）
 - ❌ 用户要求调整权重 / 查 CEI / 故障诊断（走 `cei_pipeline` / `cei_score_query` / `fault_diagnosis`）
-- ❌ 用户原话未指定保障应用 → 场景 3 **必须追问**"保障哪个应用"，不得猜测（见 `provisioning.md` §5 的 `provisioning-delivery` 特殊行为）
+- ❌ 用户原话未指定保障应用 → 场景 3 **必须追问**"保障哪个应用"，不得猜测（见 `provisioning.md` §5 的 `provisioning_delivery` 特殊行为）
 
 ## How to Use
 
