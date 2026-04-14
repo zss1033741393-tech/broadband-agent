@@ -309,6 +309,7 @@ Report (1 次)
 - 每个 Phase 的 `table_level` 必须与后续字段匹配
 - `focus_dimensions` 留空除非用户明确指定维度；值取自 `Stability / ODN / Rate / Service / OLT / Gateway / STA / Wifi`
 - 🔴 **根因分析类任务必须完成所有规划的 Phase（通常 4 个），禁止中途跳过 L3/L4 直接出报告**。如果某步执行失败，用更简单的参数重试一次，而不是放弃整个 Phase
+- 🔴 **禁止在 Phase 与 Phase 之间停下询问用户是否继续**。MacroPlan 一旦规划完成，必须连续自动执行所有 Phase 直到 Report 输出完毕，再停下等待用户。中途弹出"请确认下一步"选项菜单属于严重违规
 
 ---
 
@@ -544,7 +545,7 @@ Report 阶段只产出 **3 样东西**（不多不少）：
 
 ### 步骤
 
-1. 汇总所有 Phase 的 Step 结果，构造 context JSON：
+1. 汇总所有 Phase 的 Step 结果，构造 context JSON。**对于执行期间 `chart_configs` 非空的步骤，在该步骤的 `description` 末尾追加 `\n\n[CHART:p{phase_id}s{step_id}]`**（占位符由你插入，模板不会自动添加）：
    ```json
    {
      "title": "网络质量数据洞察报告",
@@ -559,9 +560,8 @@ Report 阶段只产出 **3 样东西**（不多不少）：
              "step_id": 1,
              "insight_type": "OutstandingMin",
              "significance": 0.41,
-             "description": "...",
-             "found_entities": {"portUuid": [...]},
-             "chart_configs": {...}
+             "description": "CEI 最低 PON 口为 288b6c71（54.08）\n\n[CHART:p1s1]",
+             "found_entities": {"portUuid": [...]}
            }
          ],
          "reflection": {"choice": "A", "reason": "..."}
