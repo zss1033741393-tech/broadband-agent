@@ -1,6 +1,6 @@
 # 体验保障参数说明（业务字段 ↔ FAN CLI 参数映射）
 
-本文件为 `experience_assurance` Skill 的 L3 参考：**只在 Provisioning 执行 `provisioning_delivery` 业务时按需加载**，不占用 Agent 常驻上下文。
+本文件为 `experience_assurance` Skill 的 L3 参考：**只在 Provisioning 执行 `provisioning-delivery` 业务时按需加载**，不占用 Agent 常驻上下文。
 
 Skill 调用前，Provisioning 根据这里的映射规则，把方案段落里的 4 个业务字段（`切片类型 / 保障应用 / 白名单 / 带宽保障`）映射到 5 个 CLI 参数（`ne-id / service-port-index / policy-profile / onu-res-id / app-id`）。
 

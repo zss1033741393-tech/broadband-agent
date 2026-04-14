@@ -89,17 +89,17 @@ def _tool_args(event: Any) -> dict:
 
 # ─── SubAgent 中文名映射 ───────────────────────────────────────────────────────
 #
-# member_id 归一化：configs/agents.yaml 里 agent key 用下划线（provisioning_wifi），
-# agno delegate_task_to_member / event.agent_id 可能是两种写法之一。
-# adapter 统一把下划线改短横线，下游 SSE stepId 对齐 docs/sse-interface-spec.md
+# member_id 归一化：configs/agents.yaml 里 agent key 已统一为 kebab-case（provisioning-wifi），
+# 但 agno 不同版本 delegate_task_to_member / event.agent_id 可能带下划线回退写法。
+# adapter 统一把潜在的下划线形式改为短横线，下游 SSE stepId 对齐 docs/sse-interface-spec.md
 # 的 kebab-case 规范。
 
 _MEMBER_DISPLAY_NAMES: dict[str, str] = {
     "planning": "PlanningAgent",
     "insight": "InsightAgent",
-    "provisioning_wifi": "ProvisioningAgent (WIFI 仿真)",
-    "provisioning_delivery": "ProvisioningAgent (差异化承载)",
-    "provisioning_cei_chain": "ProvisioningAgent (体验保障链)",
+    "provisioning-wifi": "ProvisioningAgent (WIFI 仿真)",
+    "provisioning-delivery": "ProvisioningAgent (差异化承载)",
+    "provisioning-cei-chain": "ProvisioningAgent (体验保障链)",
 }
 
 

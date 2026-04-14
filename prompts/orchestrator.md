@@ -11,9 +11,9 @@
 |---|---|---|
 | `planning` | 决策型 | 综合目标的方案规划（目标解析 + 方案设计 + 方案评审） |
 | `insight` | 决策型 | 数据洞察（查询 + 归因 + 报告） |
-| `provisioning_wifi` | 执行型 | WIFI 仿真执行（内部 4 步） |
-| `provisioning_delivery` | 执行型 | 差异化承载开通（切片/应用白名单/Appflow） |
-| `provisioning_cei_chain` | 执行型 | 体验保障链（CEI 权重配置 → CEI 评分查询 → 故障诊断 → 远程闭环） |
+| `provisioning-wifi` | 执行型 | WIFI 仿真执行（内部 4 步） |
+| `provisioning-delivery` | 执行型 | 差异化承载开通（切片/应用白名单/Appflow） |
+| `provisioning-cei-chain` | 执行型 | 体验保障链（CEI 权重配置 → CEI 评分查询 → 故障诊断 → 远程闭环） |
 
 ---
 
@@ -48,12 +48,12 @@ Orchestrator 只做关键词匹配，**不提取参数**，把用户原话作为
 
 | 用户关键词 | 路由到 | 任务头 |
 |---|---|---|
-| WIFI / 覆盖 / 信号 / 无线 / 仿真 | `provisioning_wifi` | `[任务类型: WIFI 仿真执行]` |
-| 切片 / 应用保障 / Appflow / 白名单 / 差异化 | `provisioning_delivery` | `[任务类型: 差异化承载开通]` |
-| 远程重启 / 远程优化 / 网关重启 / 闭环 | `provisioning_cei_chain` | `[任务类型: 单点远程操作]` |
-| 卡顿定界 / 故障诊断 / 故障树 / 故障定界 | `provisioning_cei_chain` | `[任务类型: 单点故障诊断]` |
-| CEI 权重 / CEI 阈值配置 / 业务质量权重 / 评分权重 / CEI 配置 | `provisioning_cei_chain` | `[任务类型: 单点 CEI 配置]` |
-| CEI 查询 / CEI 评分 / 体验查询 / 卡顿评分 / 低分用户 / 扣分详情 | `provisioning_cei_chain` | `[任务类型: 单点 CEI 查询]` |
+| WIFI / 覆盖 / 信号 / 无线 / 仿真 | `provisioning-wifi` | `[任务类型: WIFI 仿真执行]` |
+| 切片 / 应用保障 / Appflow / 白名单 / 差异化 | `provisioning-delivery` | `[任务类型: 差异化承载开通]` |
+| 远程重启 / 远程优化 / 网关重启 / 闭环 | `provisioning-cei-chain` | `[任务类型: 单点远程操作]` |
+| 卡顿定界 / 故障诊断 / 故障树 / 故障定界 | `provisioning-cei-chain` | `[任务类型: 单点故障诊断]` |
+| CEI 权重 / CEI 阈值配置 / 业务质量权重 / 评分权重 / CEI 配置 | `provisioning-cei-chain` | `[任务类型: 单点 CEI 配置]` |
+| CEI 查询 / CEI 评分 / 体验查询 / 卡顿评分 / 低分用户 / 扣分详情 | `provisioning-cei-chain` | `[任务类型: 单点 CEI 查询]` |
 
 关键词冲突时，按**最具体**原则选择（如同时出现 WIFI 和 CEI 按 Planning 路径处理）。
 
@@ -65,14 +65,14 @@ Orchestrator 只做关键词匹配，**不提取参数**，把用户原话作为
 
 | 方案段落标题 | 目标 Provisioning 实例 | 任务头 |
 |---|---|---|
-| `## WIFI 仿真方案` | `provisioning_wifi` | `[任务类型: 方案执行-WIFI仿真]` |
-| `## 差异化承载方案` | `provisioning_delivery` | `[任务类型: 方案执行-差异化承载]` |
-| `## CEI 配置方案` + `## 故障诊断方案` + `## 远程闭环处置方案` | `provisioning_cei_chain` | `[任务类型: 完整保障链]` |
+| `## WIFI 仿真方案` | `provisioning-wifi` | `[任务类型: 方案执行-WIFI仿真]` |
+| `## 差异化承载方案` | `provisioning-delivery` | `[任务类型: 方案执行-差异化承载]` |
+| `## CEI 配置方案` + `## 故障诊断方案` + `## 远程闭环处置方案` | `provisioning-cei-chain` | `[任务类型: 完整保障链]` |
 
 **规则**：
 - 若某段落 `启用: false`，**跳过**对应实例，不派发
 - 启用的多个实例**并行**调用
-- CEI + 故障 + 闭环 **三段合并**传入 `provisioning_cei_chain`，由它内部顺序串行处理（含 CEI 评分回采步骤）
+- CEI + 故障 + 闭环 **三段合并**传入 `provisioning-cei-chain`，由它内部顺序串行处理（含 CEI 评分回采步骤）
 
 ---
 

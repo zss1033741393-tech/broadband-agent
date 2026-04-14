@@ -77,7 +77,7 @@ OrchestratorTeam (leader, coordinate 模式, prompts/orchestrator.md)
 场景 1 · 综合目标:
   Orchestrator → PlanningAgent (goal_parsing → plan_design → plan_review)
                → 按方案段落拆分并行派发
-               → [provisioning_wifi] + [provisioning_delivery] + [provisioning_cei_chain]
+               → [provisioning-wifi] + [provisioning-delivery] + [provisioning-cei-chain]
                → 汇总结果
 
 场景 2 · 数据洞察:

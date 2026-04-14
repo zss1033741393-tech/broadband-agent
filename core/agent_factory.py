@@ -165,9 +165,9 @@ def create_team(session_id: Optional[str] = None) -> Team:
     for name in (
         "planning",
         "insight",
-        "provisioning_wifi",
-        "provisioning_delivery",
-        "provisioning_cei_chain",
+        "provisioning-wifi",
+        "provisioning-delivery",
+        "provisioning-cei-chain",
     ):
         sub_cfg = agents_cfg.get(name)
         if sub_cfg is None:

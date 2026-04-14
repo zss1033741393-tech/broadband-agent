@@ -50,25 +50,25 @@ def test_agents_config_structure():
     expected_agents = {
         "planning",
         "insight",
-        "provisioning_wifi",
-        "provisioning_delivery",
-        "provisioning_cei_chain",
+        "provisioning-wifi",
+        "provisioning-delivery",
+        "provisioning-cei-chain",
     }
     assert expected_agents.issubset(agents.keys())
 
     # Planning 挂载 3 个 Skill
     assert set(agents["planning"]["skills"]) == {"goal_parsing", "plan_design", "plan_review"}
     # CEI 链实例挂载 4 个 Skill（配置 → 查询 → 诊断 → 闭环）
-    assert set(agents["provisioning_cei_chain"]["skills"]) == {
+    assert set(agents["provisioning-cei-chain"]["skills"]) == {
         "cei_pipeline",
         "cei_score_query",
         "fault_diagnosis",
         "remote_optimization",
     }
     # WIFI 实例只挂 wifi_simulation
-    assert agents["provisioning_wifi"]["skills"] == ["wifi_simulation"]
+    assert agents["provisioning-wifi"]["skills"] == ["wifi_simulation"]
     # Delivery 实例只挂 experience_assurance（差异化承载，FAN 底层）
-    assert agents["provisioning_delivery"]["skills"] == ["experience_assurance"]
+    assert agents["provisioning-delivery"]["skills"] == ["experience_assurance"]
 
 
 def test_all_skills_present():
@@ -892,12 +892,12 @@ def _run_chat_handler_sync(events, team_name: str = "home-broadband-team"):
 def test_extract_source_id_member_event():
     from ui.app import _extract_source_id
 
-    ev = _FakeEvent(event="ReasoningContentDelta", agent_id="provisioning_wifi")
-    assert _extract_source_id(ev, is_leader=False) == "provisioning_wifi"
+    ev = _FakeEvent(event="ReasoningContentDelta", agent_id="provisioning-wifi")
+    assert _extract_source_id(ev, is_leader=False) == "provisioning-wifi"
 
     # 空 agent_id 回退到 agent_name
-    ev2 = _FakeEvent(event="ReasoningContentDelta", agent_id="", agent_name="provisioning_delivery")
-    assert _extract_source_id(ev2, is_leader=False) == "provisioning_delivery"
+    ev2 = _FakeEvent(event="ReasoningContentDelta", agent_id="", agent_name="provisioning-delivery")
+    assert _extract_source_id(ev2, is_leader=False) == "provisioning-delivery"
 
     # 两者都为空
     ev3 = _FakeEvent(event="ReasoningContentDelta")
@@ -936,35 +936,35 @@ def test_chat_handler_per_source_reasoning_isolation():
         # wifi 开始推理 (一段话)
         _FakeEvent(
             event="ReasoningContentDelta",
-            agent_id="provisioning_wifi",
-            agent_name="provisioning_wifi",
+            agent_id="provisioning-wifi",
+            agent_name="provisioning-wifi",
             reasoning_content="处理缺失项\n4. 展示推导过程\n5. 调用 Skill\n6. 透",
         ),
         # delivery 插入一段自己的推理 (bug 场景: 此刻会污染单 buffer)
         _FakeEvent(
             event="ReasoningContentDelta",
-            agent_id="provisioning_delivery",
-            agent_name="provisioning_delivery",
+            agent_id="provisioning-delivery",
+            agent_name="provisioning-delivery",
             reasoning_content="当前挂载的技能是 experience_assurance,有一个脚本 experience_assurance.py。",
         ),
         # wifi 继续,补完被 delivery 打断的话
         _FakeEvent(
             event="ReasoningContentDelta",
-            agent_id="provisioning_wifi",
-            agent_name="provisioning_wifi",
+            agent_id="provisioning-wifi",
+            agent_name="provisioning-wifi",
             reasoning_content="传产出。",
         ),
         # wifi 的 reasoning 结束
         _FakeEvent(
             event="ReasoningCompleted",
-            agent_id="provisioning_wifi",
-            agent_name="provisioning_wifi",
+            agent_id="provisioning-wifi",
+            agent_name="provisioning-wifi",
         ),
         # delivery 也结束
         _FakeEvent(
             event="ReasoningCompleted",
-            agent_id="provisioning_delivery",
-            agent_name="provisioning_delivery",
+            agent_id="provisioning-delivery",
+            agent_name="provisioning-delivery",
         ),
     ]
 
@@ -1018,15 +1018,15 @@ def test_chat_handler_tool_call_from_other_member_does_not_contaminate():
         # delivery 开始推理
         _FakeEvent(
             event="ReasoningContentDelta",
-            agent_id="provisioning_delivery",
-            agent_name="provisioning_delivery",
+            agent_id="provisioning-delivery",
+            agent_name="provisioning-delivery",
             reasoning_content="分析参数 schema",
         ),
         # wifi 首次出现 + 立即发起 tool_call (首次触发徽章 → 固化 delivery 当前 buffer)
         _FakeEvent(
             event="ToolCallStarted",
-            agent_id="provisioning_wifi",
-            agent_name="provisioning_wifi",
+            agent_id="provisioning-wifi",
+            agent_name="provisioning-wifi",
             tool=_FakeTool(
                 tool_name="get_skill_instructions", tool_args={"skill_name": "wifi_simulation"}
             ),
@@ -1034,15 +1034,15 @@ def test_chat_handler_tool_call_from_other_member_does_not_contaminate():
         # delivery 继续推理 (新 buffer,独立分段)
         _FakeEvent(
             event="ReasoningContentDelta",
-            agent_id="provisioning_delivery",
-            agent_name="provisioning_delivery",
+            agent_id="provisioning-delivery",
+            agent_name="provisioning-delivery",
             reasoning_content="确认字段对齐。",
         ),
         # delivery reasoning 结束
         _FakeEvent(
             event="ReasoningCompleted",
-            agent_id="provisioning_delivery",
-            agent_name="provisioning_delivery",
+            agent_id="provisioning-delivery",
+            agent_name="provisioning-delivery",
         ),
     ]
 
@@ -1081,19 +1081,19 @@ def test_chat_handler_member_badge_once_per_member():
     """每个 member 一轮只渲染一次徽章,即使事件反复交错。"""
     events = [
         _FakeEvent(
-            event="ReasoningContentDelta", agent_id="provisioning_wifi", reasoning_content="a"
+            event="ReasoningContentDelta", agent_id="provisioning-wifi", reasoning_content="a"
         ),
         _FakeEvent(
-            event="ReasoningContentDelta", agent_id="provisioning_delivery", reasoning_content="b"
+            event="ReasoningContentDelta", agent_id="provisioning-delivery", reasoning_content="b"
         ),
         _FakeEvent(
-            event="ReasoningContentDelta", agent_id="provisioning_wifi", reasoning_content="c"
+            event="ReasoningContentDelta", agent_id="provisioning-wifi", reasoning_content="c"
         ),
         _FakeEvent(
-            event="ReasoningContentDelta", agent_id="provisioning_delivery", reasoning_content="d"
+            event="ReasoningContentDelta", agent_id="provisioning-delivery", reasoning_content="d"
         ),
-        _FakeEvent(event="ReasoningCompleted", agent_id="provisioning_wifi"),
-        _FakeEvent(event="ReasoningCompleted", agent_id="provisioning_delivery"),
+        _FakeEvent(event="ReasoningCompleted", agent_id="provisioning-wifi"),
+        _FakeEvent(event="ReasoningCompleted", agent_id="provisioning-delivery"),
     ]
     history = _run_chat_handler_sync(events)
 
@@ -1121,7 +1121,7 @@ def test_render_tool_call_started_returns_single_folded_block():
     msgs = render_tool_call(
         "cei_pipeline",
         inputs={"weights": "ServiceQualityWeight:40"},
-        member="provisioning_cei_chain",
+        member="provisioning-cei-chain",
     )
     assert isinstance(msgs, list)
     assert len(msgs) == 1
@@ -1288,9 +1288,9 @@ def test_create_team_structure():
     assert set(member_names) == {
         "planning",
         "insight",
-        "provisioning_wifi",
-        "provisioning_delivery",
-        "provisioning_cei_chain",
+        "provisioning-wifi",
+        "provisioning-delivery",
+        "provisioning-cei-chain",
     }
 
     # 每个 member 的 skills 子集正确
@@ -1307,11 +1307,11 @@ def test_create_team_structure():
                 "insight_reflect",
                 "insight_report",
             }
-        elif m.name == "provisioning_wifi":
+        elif m.name == "provisioning-wifi":
             assert skill_names == {"wifi_simulation"}
-        elif m.name == "provisioning_delivery":
+        elif m.name == "provisioning-delivery":
             assert skill_names == {"experience_assurance"}
-        elif m.name == "provisioning_cei_chain":
+        elif m.name == "provisioning-cei-chain":
             assert skill_names == {
                 "cei_pipeline",
                 "cei_score_query",
