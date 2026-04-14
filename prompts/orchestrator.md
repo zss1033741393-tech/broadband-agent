@@ -71,7 +71,7 @@ Orchestrator 只做关键词匹配，**不提取参数**，把用户原话作为
 
 **规则**：
 - 若某段落 `启用: false`，**跳过**对应实例，不派发
-- 启用的多个实例**并行**调用
+- 启用的多个实例**按固定顺序串行**调用：`provisioning-wifi` → `provisioning-delivery` → `provisioning-cei-chain`，必须等前一个 `delegate_task_to_member` 工具调用返回结果后，才可发起下一个。**严禁**在同一轮对话中并发发起多个 `delegate_task_to_member` 调用。
 - CEI + 故障 + 闭环 **三段合并**传入 `provisioning-cei-chain`，由它内部顺序串行处理（含 CEI 评分回采步骤）
 
 ---
