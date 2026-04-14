@@ -545,7 +545,14 @@ Report 阶段只产出 **3 样东西**（不多不少）：
 
 ### 步骤
 
-1. 汇总所有 Phase 的 Step 结果，构造 context JSON。**对于执行期间 `chart_configs` 非空的步骤，在该步骤的 `description` 末尾追加 `\n\n[CHART:p{phase_id}s{step_id}]`**（占位符由你插入，模板不会自动添加）：
+1. 汇总所有 Phase 的 Step 结果，构造 context JSON。**对于执行期间 `chart_configs` 非空的步骤，在该步骤的 `description` 末尾追加 `\n\n[CHART:p{phase_id}s{step_id}]`**（占位符由你插入，模板不会自动添加）。
+
+   🔴 **占位符格式铁律（零容忍）**：
+   - 必须全大写 `CHART`，禁止 `chart` / `Chart`
+   - 必须用方括号 `[...]`，禁止圆括号 `(...)` 或花括号 `{...}`
+   - `p` 和 `s` 必须小写，后面紧跟整数，禁止空格、连字符、下划线
+   - ✅ 唯一合法格式：`[CHART:p1s1]`、`[CHART:p2s3]`
+   - ❌ 非法：`[chart:p1s1]`、`[CHART:p1-s1]`、`[CHART: p1s1]`、`(CHART:p1s1)`
    ```json
    {
      "title": "网络质量数据洞察报告",
