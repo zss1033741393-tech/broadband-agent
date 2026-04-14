@@ -89,9 +89,9 @@ def _tool_args(event: Any) -> dict:
 
 # ─── SubAgent 中文名映射 ───────────────────────────────────────────────────────
 #
-# member_id 归一化：configs/agents.yaml 里 agent key 用下划线（provisioning_wifi），
-# agno delegate_task_to_member / event.agent_id 可能是两种写法之一。
-# adapter 统一把下划线改短横线，下游 SSE stepId 对齐 docs/sse-interface-spec.md
+# member_id 归一化：configs/agents.yaml 里 agent key 已统一为 kebab-case（provisioning-wifi），
+# 但 agno 不同版本 delegate_task_to_member / event.agent_id 可能带下划线回退写法。
+# adapter 统一把潜在的下划线形式改为短横线，下游 SSE stepId 对齐 docs/sse-interface-spec.md
 # 的 kebab-case 规范。
 
 _MEMBER_DISPLAY_NAMES: dict[str, str] = {
@@ -208,13 +208,25 @@ async def _adapt_body(
     steps_by_id: dict[str, StepAggregate] = {}
 
     def _step_for_event(event: Any, leader: bool) -> Optional[StepAggregate]:
-        """根据事件的 agent_id 找对应 step；leader 事件返回 None（归属顶层）。"""
+        """根据事件的 agent 标识找对应 step；leader 事件返回 None（归属顶层）。
+
+        agno Agent(name=...) 只设 name，agent_id 由 agno 默认给 UUID。
+        不同事件类型对 event.agent_id / event.agent_name 的赋值并不统一，
+        例如 ToolCall 类事件往往带 name，而 ReasoningContentDelta /
+        RunContent 可能只带 UUID。此处**同时尝试 name 与 id 两个属性**，
+        任意一个归一化后能在 steps_by_id 命中即采用，消除属性不一致导致
+        的 stepId 丢失（表现为 3 张卡片里没有 thinking / 过程文字）。
+        """
         if leader:
             return None
-        sid = _source_id(event, leader=False)
-        if not sid:
-            return None
-        return steps_by_id.get(_canonical_member_id(sid))
+        for attr in ("agent_name", "agent_id"):
+            v = getattr(event, attr, None)
+            if not v:
+                continue
+            step = steps_by_id.get(_canonical_member_id(str(v)))
+            if step is not None:
+                return step
+        return None
 
     # ── trace 段级化状态 ────────────────────────────────────────────────────
     # thinking 与 member content 都按 token 流式到达；按段（source 切换 / 工具
@@ -312,20 +324,21 @@ async def _adapt_body(
                     yield format_sse("text", {"delta": str(c_delta)}), agg
                 continue
 
-            # ── member content：按 member 类型分通道透传 ──
+            # ── member content：非 leader member 的最终答复 ──────────────────
             #
-            # 策略差异：
-            #   insight  → text(stepId="insight")
-            #              前端 InsightEventParser 挂在 text 分支，依赖原文里的
-            #              <!--event:xxx--> marker 作结构化渲染
-            #   其它 member → thinking(stepId=xxx)
-            #              前端 thinking 分支已按 stepId 正确路由到对应 StepCard，
-            #              内容是"step 内部过程说明"（读方案/提参/调 skill/总结），
-            #              语义上天然对应 StepCard 折叠区的过程展示
+            # 方案 C（2026-04 · 统一走 text 通道 + stepId 路由）：
+            #   所有非 leader member（insight / planning / 3 × provisioning）的
+            #   RunContent.content 都走 `text { delta, stepId }`。前端 text 分支
+            #   识别到 payload.stepId 存在时按 stepId 路由到对应 StepCard 的
+            #   "答复区"（非折叠），无 stepId 时 fallback 顶层正文（leader 总结）。
             #
-            # 背景：前端 text 分支使用"last unfinished step"而非 stepId 路由，
-            # 并行派发场景下会把所有 text 累到最后一张卡。前端不改动的前提下
-            # 用 thinking 通道绕过此限制。
+            #   - thinking 通道现在只承载真正的"思考" token（ReasoningContentDelta
+            #     与 RunContent.reasoning_content），不再被 member 的最终答复污染
+            #   - InsightEventParser 仍挂在 text 分支，按 stepId="insight" 激活 +
+            #     解析 <!--event:xxx--> marker，保持原行为
+            #   - agg.content 只累加 leader content（顶层总结）；member content
+            #     累加到 step.text_content（随 step 一起落业务库）+
+            #     member_text_buffers（observability 层独立记录）
             if etype == "RunContent" and not leader:
                 step_for_evt = _step_for_event(event, leader)
                 if step_for_evt is not None:
@@ -333,28 +346,18 @@ async def _adapt_body(
                     if c_delta:
                         text_delta = str(c_delta)
                         step_for_evt.text_content += text_delta
-                        if step_for_evt.step_id == "insight":
-                            # marker 解析路径保留不变
-                            if reasoning_buffer:
-                                _flush_reasoning()
-                            member_text_buffers["insight"] = (
-                                member_text_buffers.get("insight", "") + text_delta
-                            )
-                            yield format_sse(
-                                "text",
-                                {"delta": text_delta, "stepId": "insight"},
-                            ), agg
-                        else:
-                            # planning / provisioning-* 的 content 作为 StepCard 内
-                            # 的过程展示文字（thinking 通道已按 stepId 路由）
-                            if thinking_start is None:
-                                thinking_start = time.monotonic()
-                            thinking_end = time.monotonic()
-                            agg.thinking_content += text_delta
-                            yield format_sse(
-                                "thinking",
-                                {"delta": text_delta, "stepId": step_for_evt.step_id},
-                            ), agg
+                        # observability 层独立记录每个 member 的 content
+                        member_text_buffers[step_for_evt.step_id] = (
+                            member_text_buffers.get(step_for_evt.step_id, "")
+                            + text_delta
+                        )
+                        # 答复进入说明该 member 的思考段已结束，flush 旧 thinking 段
+                        if reasoning_buffer and reasoning_source == sid:
+                            _flush_reasoning()
+                        yield format_sse(
+                            "text",
+                            {"delta": text_delta, "stepId": step_for_evt.step_id},
+                        ), agg
                     continue
 
             # ── step_start ────────────────────────────────────────────────
@@ -424,9 +427,14 @@ async def _adapt_body(
                 result_raw = getattr(tool, "result", None) or ""
                 stdout, stderr = _extract_stdout_stderr(result_raw)
 
-                # 用 event.agent_id（非 leader）查对应 step，不再依赖 active_step
+                # 用 _step_for_event 查对应 step（同时尝试 agent_name / agent_id），
+                # fallback 也优先用 agent_name 归一化，避免 agent_id 是 UUID 时跑偏
                 step_for_evt = _step_for_event(event, leader=False)
-                step_id = step_for_evt.step_id if step_for_evt else _canonical_member_id(agent_id)
+                if step_for_evt is not None:
+                    step_id = step_for_evt.step_id
+                else:
+                    raw_name = getattr(event, "agent_name", None) or agent_id
+                    step_id = _canonical_member_id(str(raw_name))
                 sub_step_id = f"{step_id}_{skill_name}"
                 completed_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
