@@ -480,19 +480,19 @@ async def _adapt_body(
                         agg.render_blocks.append(rb)
                         yield format_sse("render", rb), agg
 
-                # insight 场景：每次 insight_query / insight_report 完成即发独立 report
-                # 事件（替代原 render 通道）。职责划分：
-                #   - `render` 事件：仅供图片类可视化（wifi_simulation images / 未来其它 image）
-                #   - `report` 事件：承载 insight 的全部产物（charts + markdownReport）
-                # 持久化仍复用 render_blocks 列 —— payload 结构不变
-                # (renderType="insight" / renderData:{charts, markdownReport})，
-                # 历史回放读 renderBlocks 字段逻辑与之前完全一致。
-                # 流式下前端需新增 case 'report' 分支（处理逻辑等同于原
-                # case 'render' 中 renderType==="insight" 的路径）。
+                # insight 场景：每次 insight_query / insight_report 完成时，同时
+                # 下发 `report` 和 `render` 两条 SSE 事件，payload 完全一致。
+                # 职责划分：
+                #   - `report` 主通道：前端产品流程渲染用（insight 的 charts + markdown）
+                #   - `render` debug 通道：保留旧事件名 + 相同 payload，供前端对比 /
+                #     过渡期消费；未来 render 将专供图片类可视化
+                # 前端自主选择消费其中一条通道（消费两条会重复渲染）。
+                # 持久化只写一份到 render_blocks，避免历史回放出现两倍内容。
                 if step_for_evt is not None and step_for_evt.step_id == "insight":
                     for rb in _emit_insight_render(skill_name, result_raw, sub_step_id):
-                        agg.render_blocks.append(rb)
-                        yield format_sse("report", rb), agg
+                        agg.render_blocks.append(rb)              # 持久化一次
+                        yield format_sse("report", rb), agg       # 主通道
+                        yield format_sse("render", rb), agg       # debug 冗余
 
                 continue
 
