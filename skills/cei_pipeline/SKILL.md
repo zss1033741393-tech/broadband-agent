@@ -38,7 +38,8 @@ description: "CEI 权重配置下发：调用 FAE 平台 config-threshold 接口
 - ✅ 场景 1（综合目标）"CEI 配置方案"段落启用时 → 完整保障链第一步
 - ✅ 场景 3（单点指令）"调整 CEI 权重" / "提高业务质量权重" → 任务头 `[任务类型: 单点 CEI 配置]`
 - ❌ 用户只是咨询 CEI 概念（直接回答即可）
-- ❌ 用户要求数据洞察或评分查询（应走 `data_insight` 或未来的 CEI 评分查询 Skill）
+- ❌ 用户要求 CEI 评分查询 / 低分用户拉取（应走 `cei_score_query`）
+- ❌ 用户要求数据洞察 / 归因分析（应走 InsightAgent 的 `insight_*` skills）
 - ❌ 需要调整故障诊断或远程闭环策略（分别走 `fault_diagnosis` / `remote_optimization`）
 
 ## How to Use
@@ -124,13 +125,13 @@ Provisioning Agent 调用本 Skill 时 `get_skill_script` 建议显式传 `timeo
 
 ## 依赖与部署
 
-`scripts/cei_threshold_config.py` 依赖项目根的 `fae_poc/` 包（见 `fae_poc/__init__.py` 的 docstring），与 `remote_optimization` 共享同一套基础设施。初次部署：
+`scripts/cei_threshold_config.py` 依赖项目根的 `fae_poc/` 包（见 `fae_poc/__init__.py` 的 docstring），与 `cei_score_query` / `fault_diagnosis` / `remote_optimization` / `experience_assurance` 共享同一套基础设施。初次部署：
 
 1. 把本地 `NCELogin.py` 拷贝到 `fae_poc/NCELogin.py`（已 `.gitignore`）
 2. 把 `fae_poc/config.ini.example` 复制为 `fae_poc/config.ini` 并填入真实 `base_url` / `csrf_token` / `cookie`（已 `.gitignore`）
 3. config.ini 需包含 `[API]`（`ip` / `port`）和 `[AuthTokens]`（`x-uni-crsf-token` / `cookie`）两节
 
-未完成部署时脚本应以结构化 JSON 返回 `status=failed, stage=deployment_check`，不要 crash（与 `remote_optimization` 的降级行为一致）。
+未完成部署时脚本应以结构化 JSON 返回 `status=failed, stage=deployment_check`，不要 crash（与同族 FAE / FAN Skill 的降级行为一致）。
 
 ## 禁止事项
 
@@ -139,4 +140,4 @@ Provisioning Agent 调用本 Skill 时 `get_skill_script` 建议显式传 `timeo
 - ❌ 不在 `weights` 里填 8 个字段之外的未知参数名（会被 FAE 平台拒绝）
 - ❌ 不要在 Provisioning Agent 里自己拼装 FAE 接口 JSON，统一通过本 Skill 的 CLI 入口
 - ❌ 不要改写脚本 stdout，原样透传给用户
-- ❌ 不要在本 Skill 里尝试查询 CEI 评分 — 评分查询是未来独立 Skill 的职责（当前中间态由 Provisioning Agent 在 `provisioning.md` 的保障链规则里 inline mock）
+- ❌ 不要在本 Skill 里尝试查询 CEI 评分 — 评分查询是 `cei_score_query` Skill 的职责，保障链里由 Provisioning 在本 Skill 下发完成后顺序调用
