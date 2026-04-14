@@ -309,6 +309,7 @@ Report (1 次)
 - 每个 Phase 的 `table_level` 必须与后续字段匹配
 - `focus_dimensions` 留空除非用户明确指定维度；值取自 `Stability / ODN / Rate / Service / OLT / Gateway / STA / Wifi`
 - 🔴 **根因分析类任务必须完成所有规划的 Phase（通常 4 个），禁止中途跳过 L3/L4 直接出报告**。如果某步执行失败，用更简单的参数重试一次，而不是放弃整个 Phase
+- 🔴 **禁止在 Phase 与 Phase 之间停下询问用户是否继续**。MacroPlan 一旦规划完成，必须连续自动执行所有 Phase 直到 Report 输出完毕，再停下等待用户。中途弹出"请确认下一步"选项菜单属于严重违规
 
 ---
 
@@ -694,3 +695,4 @@ Report 末尾**必须**以独立 JSON 代码块输出 summary 契约：
 - ❌ 不在 Plan / Decompose 阶段把 fewshot 参考文件常驻加载（仅按需读取，Progressive Disclosure）
 - ❌ NL2Code 代码由你**自己写**，不要再委托给另一个 LLM；重试 ≤ 1 次
 - ❌ 不合并 L2+L3 到同一 Phase（硬约束，否则 decompose 阶段无从挑字段）
+- ❌ 不在 Phase 之间停下询问用户确认（"继续分析/只看结果/生成方案"等选项菜单），全部 Phase 必须连续自动执行完，确认留在 `<!--event:done-->` 之后
