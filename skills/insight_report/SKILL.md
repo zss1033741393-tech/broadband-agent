@@ -64,3 +64,4 @@ context JSON 格式见 `references/output_schema.md`。
 ## 禁止事项
 - ❌ 不得改写 render_report.py 的 stdout
 - ❌ 报告完成后禁止自动进入 Planning（必须等用户确认）
+- ❌ context JSON 各字段（包括 key_findings、direct_answer、root_cause_narrative 等）禁止使用 emoji 字符，只能使用纯文本
