@@ -312,27 +312,49 @@ async def _adapt_body(
                     yield format_sse("text", {"delta": str(c_delta)}), agg
                 continue
 
-            # ── member content（InsightAgent）原样透传为 text(stepId=insight) ──
-            # 语义：member 的 content 是 SubAgent 的 assistant 响应（非推理），
-            # 与 Orchestrator 的 text 同类，仅归属某个 step。
-            # 不在后端解析 <!--event:xxx--> 标记，由前端按原文自行识别。
-            # 其它 member 的 content 暂不处理（沿用原丢弃策略，避免范围蔓延）。
+            # ── member content：按 member 类型分通道透传 ──
+            #
+            # 策略差异：
+            #   insight  → text(stepId="insight")
+            #              前端 InsightEventParser 挂在 text 分支，依赖原文里的
+            #              <!--event:xxx--> marker 作结构化渲染
+            #   其它 member → thinking(stepId=xxx)
+            #              前端 thinking 分支已按 stepId 正确路由到对应 StepCard，
+            #              内容是"step 内部过程说明"（读方案/提参/调 skill/总结），
+            #              语义上天然对应 StepCard 折叠区的过程展示
+            #
+            # 背景：前端 text 分支使用"last unfinished step"而非 stepId 路由，
+            # 并行派发场景下会把所有 text 累到最后一张卡。前端不改动的前提下
+            # 用 thinking 通道绕过此限制。
             if etype == "RunContent" and not leader:
                 step_for_evt = _step_for_event(event, leader)
-                if step_for_evt is not None and step_for_evt.step_id == "insight":
+                if step_for_evt is not None:
                     c_delta = getattr(event, "content", None)
                     if c_delta:
-                        if reasoning_buffer:
-                            _flush_reasoning()
                         text_delta = str(c_delta)
                         step_for_evt.text_content += text_delta
-                        member_text_buffers["insight"] = (
-                            member_text_buffers.get("insight", "") + text_delta
-                        )
-                        yield format_sse(
-                            "text",
-                            {"delta": text_delta, "stepId": "insight"},
-                        ), agg
+                        if step_for_evt.step_id == "insight":
+                            # marker 解析路径保留不变
+                            if reasoning_buffer:
+                                _flush_reasoning()
+                            member_text_buffers["insight"] = (
+                                member_text_buffers.get("insight", "") + text_delta
+                            )
+                            yield format_sse(
+                                "text",
+                                {"delta": text_delta, "stepId": "insight"},
+                            ), agg
+                        else:
+                            # planning / provisioning-* 的 content 作为 StepCard 内
+                            # 的过程展示文字（thinking 通道已按 stepId 路由）
+                            if thinking_start is None:
+                                thinking_start = time.monotonic()
+                            thinking_end = time.monotonic()
+                            agg.thinking_content += text_delta
+                            yield format_sse(
+                                "thinking",
+                                {"delta": text_delta, "stepId": step_for_evt.step_id},
+                            ), agg
                     continue
 
             # ── step_start ────────────────────────────────────────────────
