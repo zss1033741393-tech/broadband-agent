@@ -69,9 +69,11 @@ class SubStep(BaseModel):
 class Step(BaseModel):
     stepId: str
     title: str
+    # 有序渲染块列表（thinking / sub_step / text），历史回放时前端直接使用，
+    # 无需从 subSteps 重建，保证与流式展示完全一致。老数据无此字段时默认空列表。
+    items: List[Any] = []
     subSteps: List[SubStep] = []
-    # SubAgent 本身输出的 assistant content（流式到达时以 text(stepId) 事件推送；
-    # 历史回放时一次性随 Step 下发，供前端补绘阶段文本）
+    # SubAgent 本身输出的 assistant content
     textContent: str = ""
 
 

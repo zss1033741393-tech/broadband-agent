@@ -4,7 +4,7 @@
 #   team  — Team leader (Orchestrator) 配置
 #   agents — 5 个 SubAgent (1 决策型 Planning + 1 决策型 Insight + 3 执行型 Provisioning 实例)
 #
-# agno Team 不支持运行时动态添加 member，因此预声明 3 个 Provisioning 实例覆盖场景 1 的并行需求。
+# agno Team 不支持运行时动态添加 member，因此预声明 3 个 Provisioning 实例；Orchestrator 按序串行派发。
 
 team:
   name: home-broadband-team

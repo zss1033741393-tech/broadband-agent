@@ -111,15 +111,27 @@ async def send_message(conv_id: str, body: SendMessageRequest):
             # 落库 assistant 消息
             if agg is not None:
                 try:
-                    steps_data = [
-                        {
+                    steps_data = []
+                    for s in agg.steps:
+                        # 流结束时 flush 未被 ToolCallStarted 消费的残留缓冲
+                        # （最后一个 Skill 完成后 InsightAgent 可能还有反思/总结文本和 thinking）
+                        items = list(s.items)
+                        if s.pending_text:
+                            items.append({"type": "text", "content": s.pending_text})
+                        if s.pending_thinking:
+                            items.append({
+                                "type": "thinking",
+                                "content": s.pending_thinking,
+                                "startedAt": 0,
+                                "endedAt": 0,
+                            })
+                        steps_data.append({
                             "stepId": s.step_id,
                             "title": s.title,
-                            "subSteps": s.sub_steps,
+                            "items": items,
+                            "subSteps": s.sub_steps,   # 保留，供旧前端降级 / 计数
                             "textContent": s.text_content,
-                        }
-                        for s in agg.steps
-                    ]
+                        })
                     await repo.insert_assistant_message(
                         conv_id=conv_id,
                         content=agg.content,

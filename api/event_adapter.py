@@ -42,10 +42,18 @@ _IMAGES_DIR = Path(__file__).resolve().parents[1] / "data" / "images"
 class StepAggregate:
     step_id: str
     title: str
+    # 有序渲染块：thinking / sub_step / text，流式过程中实时 append，落库后原样返回给前端。
+    # 前端 rebuildBlocks 直接用这个数组，无需从 subSteps 重建，历史回放与流式展示完全一致。
+    items: list = field(default_factory=list)
+    # subSteps 保留用于向后兼容（旧前端降级渲染 / 前端计数显示）
     sub_steps: list = field(default_factory=list)
     # SubAgent 本身输出的 assistant content（如 InsightAgent 的阶段 marker 文本）
-    # 对应 SSE 事件：text { delta, stepId }
     text_content: str = ""
+    # ToolCallStarted 前积累的 text 缓冲（InsightAgent 在 Skill 调用间输出中间文本）
+    # 与 pending_thinking 同步 flush 进 items，保证 text→thinking→sub_step 顺序
+    pending_text: str = ""
+    # 当前 subStep 启动前积累的 thinking 缓冲；ToolCallStarted 时 flush 进 items，然后重置
+    pending_thinking: str = ""
 
 
 @dataclass
@@ -282,10 +290,12 @@ async def _adapt_body(
                         thinking_start = time.monotonic()
                     thinking_end = time.monotonic()
                     agg.thinking_content += delta
-                    payload: dict = {"delta": delta}
                     step_for_evt = _step_for_event(event, leader)
                     if step_for_evt is not None:
-                        payload["stepId"] = step_for_evt.step_id
+                        step_for_evt.pending_thinking += delta
+                        payload: dict = {"delta": delta, "stepId": step_for_evt.step_id}
+                    else:
+                        payload = {"delta": delta}
                     yield format_sse("thinking", payload), agg
                     # source 切换 → 旧段先 flush 再开新段
                     if sid and sid != reasoning_source:
@@ -302,10 +312,12 @@ async def _adapt_body(
                         thinking_start = time.monotonic()
                     thinking_end = time.monotonic()
                     agg.thinking_content += r_delta
-                    payload = {"delta": r_delta}
                     step_for_evt = _step_for_event(event, leader)
                     if step_for_evt is not None:
-                        payload["stepId"] = step_for_evt.step_id
+                        step_for_evt.pending_thinking += r_delta
+                        payload = {"delta": r_delta, "stepId": step_for_evt.step_id}
+                    else:
+                        payload = {"delta": r_delta}
                     yield format_sse("thinking", payload), agg
                     if sid and sid != reasoning_source:
                         _flush_reasoning()
@@ -346,6 +358,8 @@ async def _adapt_body(
                     if c_delta:
                         text_delta = str(c_delta)
                         step_for_evt.text_content += text_delta
+                        # pending_text 缓冲：ToolCallStarted 时按位置 flush 进 items
+                        step_for_evt.pending_text += text_delta
                         # observability 层独立记录每个 member 的 content
                         member_text_buffers[step_for_evt.step_id] = (
                             member_text_buffers.get(step_for_evt.step_id, "")
@@ -397,6 +411,29 @@ async def _adapt_body(
                     "scriptPath": args.get("script_path", ""),
                     "callArgs": args.get("args", []),
                 })
+                # ── UUID 注册：把 agent_id(UUID) → step 映射写入 steps_by_id ──────
+                # ReasoningContentDelta 事件只带 agent_id(UUID)，不带 agent_name；
+                # 在此首次见到真实 agent_id 时补注册，之后 thinking 事件才能正确归属。
+                step_for_evt_start = _step_for_event(event, leader=False)
+                if step_for_evt_start is not None and agent_id and agent_id not in steps_by_id:
+                    steps_by_id[agent_id] = step_for_evt_start
+
+                # ── flush：先 pending_text，再 pending_thinking，保证顺序 ──────────
+                if step_for_evt_start is not None:
+                    if step_for_evt_start.pending_text:
+                        step_for_evt_start.items.append({
+                            "type": "text",
+                            "content": step_for_evt_start.pending_text,
+                        })
+                        step_for_evt_start.pending_text = ""
+                    if step_for_evt_start.pending_thinking:
+                        step_for_evt_start.items.append({
+                            "type": "thinking",
+                            "content": step_for_evt_start.pending_thinking,
+                            "startedAt": 0,
+                            "endedAt": 0,
+                        })
+                        step_for_evt_start.pending_thinking = ""
 
                 # ── trace: tool_invoke ────────────────────────────────
                 if tracer is not None:
@@ -450,6 +487,8 @@ async def _adapt_body(
                 }
                 if step_for_evt is not None:
                     step_for_evt.sub_steps.append(sub)
+                    # sub_step 块追加到有序 items 数组
+                    step_for_evt.items.append({"type": "sub_step", "data": sub})
 
                 yield format_sse("sub_step", {"stepId": step_id, **sub}), agg
 
@@ -480,12 +519,19 @@ async def _adapt_body(
                         agg.render_blocks.append(rb)
                         yield format_sse("render", rb), agg
 
-                # insight 场景：每次 insight_query / insight_report 完成即发独立 render
-                # 与 wifi 图一致的渐进式节奏，对应 docs/sse-interface-spec.md §render
+                # insight 场景：每次 insight_query / insight_report 完成时，同时
+                # 下发 `report` 和 `render` 两条 SSE 事件，payload 完全一致。
+                # 职责划分：
+                #   - `report` 主通道：前端产品流程渲染用（insight 的 charts + markdown）
+                #   - `render` debug 通道：保留旧事件名 + 相同 payload，供前端对比 /
+                #     过渡期消费；未来 render 将专供图片类可视化
+                # 前端自主选择消费其中一条通道（消费两条会重复渲染）。
+                # 持久化只写一份到 render_blocks，避免历史回放出现两倍内容。
                 if step_for_evt is not None and step_for_evt.step_id == "insight":
                     for rb in _emit_insight_render(skill_name, result_raw, sub_step_id):
-                        agg.render_blocks.append(rb)
-                        yield format_sse("render", rb), agg
+                        agg.render_blocks.append(rb)              # 持久化一次
+                        yield format_sse("report", rb), agg       # 主通道
+                        yield format_sse("render", rb), agg       # debug 冗余
 
                 continue
 
