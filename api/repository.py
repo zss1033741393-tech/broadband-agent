@@ -261,6 +261,7 @@ def _row_to_message(row: aiosqlite.Row) -> Message:
                 title=s.get("title", ""),
                 subSteps=[],  # 无法还原时留空，UI 自会降级显示"暂无内容"
                 textContent=s.get("textContent", ""),
+                thinkingContent=s.get("thinkingContent", ""),
             ))
             # safe_subs 仅保留原始 dict 供调试日志，未接入 Message 结构
             _ = safe_subs
