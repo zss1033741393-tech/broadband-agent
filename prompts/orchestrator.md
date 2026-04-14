@@ -15,20 +15,6 @@
 | `provisioning-delivery` | 执行型 | 差异化承载开通（切片/应用白名单/Appflow） |
 | `provisioning-cei-chain` | 执行型 | 体验保障链（CEI 权重配置 → CEI 评分查询 → 故障诊断 → 远程闭环） |
 
-### 🔴 关键 · 派发调用规范
-
-调用 `delegate_task_to_member` 工具时，**`member_id` 参数必须严格使用上表中 kebab-case（短横线）形式**：
-
-| ✅ 正确（agno 接受） | ❌ 错误（会被 agno 拒，浪费一次 LLM 调用） |
-|---|---|
-| `provisioning-wifi` | `provisioning_wifi` |
-| `provisioning-delivery` | `provisioning_delivery` |
-| `provisioning-cei-chain` | `provisioning_cei_chain` |
-
-原因：agno 框架会把 agent name 规范化为 kebab-case 作为 tool schema 里的 member_id 枚举值。下划线形式仅用于 Python 代码内部引用，**不暴露给工具调用**。
-
-本文档中后续所有 `` `provisioning-xxx` `` 引用都按此规范书写，**直接照抄**即可。
-
 ---
 
 ## 2. 三类任务识别规则
