@@ -27,12 +27,29 @@
 后面所有阶段的细节都建立在这 6 条之上。任何违反都会导致工具调用失败、前端渲染错误，
 或整个洞察任务前功尽弃。
 
-### 铁律 1 · args 必须是 Python list，禁止字符串包裹
+### 铁律 1 · args 必须是 List[str]，每个元素是序列化后的 JSON 字符串
 
-agno 的 `get_skill_script` 用 Pydantic 强校验 `args` 类型为 `List[str]`。所有 payload JSON
-必须**作为 list 的元素**传入，**不能把 list 整体序列化成 string**。
+agno 的 `get_skill_script` 用 Pydantic 强校验 `args` 类型为 `List[str]`。
+**每次调用前必须按以下 4 步构造，不得跳过任何一步**：
 
-✅ **正确**（args 是 Python 列表，里面一个 string 元素，元素内容是 JSON）：
+```
+第 1 步：构造 dict
+    payload = {"insight_type": "OutstandingMin", "query_config": {...}, ...}
+
+第 2 步：序列化为字符串（⚠️ 最容易被跳过的一步）
+    payload_str = json.dumps(payload)
+    # payload_str 现在是一个 str，例如 '{"insight_type": "OutstandingMin", ...}'
+
+第 3 步：放入 list
+    args = [payload_str]
+    # args 是 list，唯一的元素是 str
+
+第 4 步：调用前检查
+    # args 应该是 ["..."]，外层是方括号，内层是引号包裹的 JSON 字符串
+    # 如果 args 是 "{...}" 或 {...} 或 '[...]' ← 全部错误，回第 1 步
+```
+
+✅ **正确示例**：
 ```
 get_skill_script(
     "insight_query",
@@ -42,46 +59,25 @@ get_skill_script(
 )
 ```
 
-❌ **错误 1**（list 整体被字符串包裹 — **最常踩的坑**）：
+❌ **错误 1 → Pydantic 报 `args  Input should be a valid list`**：
 ```
 args='["{\"insight_type\":\"OutstandingMin\"...}"]'
-      ↑                                              ↑
-      最外层多了引号，args 变成了 str 不是 list
 ```
+args 变成了 str 不是 list。**修复：去掉外层引号，改成 Python list 字面量**。
 
-❌ **错误 2**（多套了一层 JSON 编码）：
+❌ **错误 2 → 双重编码，元素带多余转义**：
 ```
 args=['"{\"insight_type\":...}"']
-       ↑                        ↑
-       string 元素被 JSON 编码了第二次
 ```
+元素被 JSON 编码了第二次。**修复：直接 json.dumps(payload) 不加引号包裹**。
 
-❌ **错误 3**（list 元素是 Python dict，没有序列化成 string — 和错误 1 同等常见）：
+❌ **错误 3 → Pydantic 报 `args.0  Input should be a valid string`**：
 ```
 args=[{"table": "day", "focus_dimensions": []}]
-      ↑                                       ↑
-      元素是 dict 对象，必须先 json.dumps 成字符串
 ```
+元素是 dict 对象，没有执行第 2 步。**修复：补做 json.dumps，把 dict 变成 str 再放进 list**。
 
-**如果你看到这些 Pydantic 错误，就是你犯了铁律 1**：
-```
-# args 整体是 string（错误 1）：
-1 validation error for Skills._get_skill_script
-args  Input should be a valid list [type=list_type, input_value='["...', input_type=str]
-
-# args[0] 是 dict（错误 3）：
-1 validation error for Skills._get_skill_script
-args.0
-  Input should be a valid string [type=string_type, input_value={...}, input_type=dict]
-```
-
-**正确构造步骤**（按这个流程走，不要跳）：
-1. 心里构造 Python dict：`payload = {"insight_type": "OutstandingMin", ...}`
-2. 把 dict 序列化成 ONE string：`payload_str = json.dumps(payload)`
-3. 把 string 作为 list 的唯一元素：`args = [payload_str]`
-4. **不要再对 args 整体做任何序列化**
-
-⚠️ **每次调用 `get_skill_script` 前必须在 reasoning 中确认**：`args` 的值是 `[...]` Python list 字面量，不是 `'[...]'` 字符串。工具结果中的 stderr 日志（包括 SQL 语句、DEBUG 行）**不影响下一次调用的 args 格式**，看到 stderr 输出后直接忽略，按上面步骤重新构造 args。
+⚠️ **看到 Pydantic 报错后立即按上面 4 步重新构造，不要只调整括号/引号**。stderr 里的 SQL 日志和 DEBUG 行与 args 格式无关，直接忽略。
 
 ### 铁律 2 · insight_type 必须从下面 12 个白名单中选
 
