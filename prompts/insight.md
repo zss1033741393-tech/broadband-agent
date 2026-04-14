@@ -557,6 +557,15 @@ Report 阶段只产出 **3 样东西**（不多不少）：
    {
      "title": "网络质量数据洞察报告",
      "goal": "<MacroPlan.goal>",
+     "direct_answer": "1-2 句直接回答用户问题，点明核心结论，例：该区域 CEI 低分主要由 PON-1 的 ODN 光路衰减导致，高峰时段 19:00-22:00 尤为明显。",
+     "key_findings": [
+       "🔴 最严重问题：PON-1 CEI 得分 54.08，低于均值 13.2 分，z-score=5.36",
+       "📊 主导维度：ODN_score 贡献度 43%，是拉低 CEI 均值的首要因素",
+       "📅 问题时段：分钟表数据显示高峰时段 19:00-22:00 异常集中",
+       "🔗 因果链路：RxPower 持续低于 -25dBm → BIP 误码率升高 → ODN_score 下滑"
+     ],
+     "root_cause_narrative": "根据 L3/L4 Phase 分析，根本原因是...（结合各 Phase 发现串联叙述，2-4 句）",
+     "impact_summary": "涉及 N 个 PON 口设备，影响约 X 个用户，CEI 均值从正常的 Y 下降至 Z（降幅 W%）。",
      "phases": [
        {
          "phase_id": 1,
@@ -574,9 +583,15 @@ Report 阶段只产出 **3 样东西**（不多不少）：
          "reflection": {"choice": "A", "reason": "..."}
        }
      ],
-     "summary": { ... 见下方 §8 交接契约 ... }
+     "summary": { "...": "见下方 §8 交接契约" }
    }
    ```
+
+   **新字段填写要求**：
+   - `direct_answer`：必填，1-2 句，直接点名结论，不要"本报告将..."这类套话
+   - `key_findings`：必填，3-5 条，每条带 emoji 前缀（🔴=严重/📊=指标/📅=时间/🔗=关联），有数据就带数字
+   - `root_cause_narrative`：L3/L4 Phase 有结果时必填，串联各 Phase 发现讲因果链；只有 L1/L2 时可省略
+   - `impact_summary`：必填，量化影响范围（设备数、用户数、分数降幅）
 
 2. 调用：
    ```
