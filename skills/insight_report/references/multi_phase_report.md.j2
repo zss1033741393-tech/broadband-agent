@@ -60,7 +60,7 @@
 - *字段修复警告*: {{ step.fix_warnings | join("; ") }}
 {% endif %}
 {% if step.chart_configs %}
-<!--chart:p{{ phase.phase_id }}s{{ step.step_id }}-->
+[CHART:p{{ phase.phase_id }}s{{ step.step_id }}]
 {% endif %}
 
 {% endfor %}
