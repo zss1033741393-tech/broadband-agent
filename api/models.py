@@ -59,6 +59,8 @@ class SubStep(BaseModel):
     name: str
     completedAt: str
     durationMs: int
+    # 该 subStep 开始前、上一个 subStep 结束后积累的 thinking 内容（默认空，兼容老数据）
+    preThinkingContent: str = ""
     # 以下字段按 SSE 规范均为可选，缺失时前端也能正常渲染
     scriptPath: Optional[str] = None
     callArgs: Optional[List[str]] = None
@@ -73,7 +75,6 @@ class Step(BaseModel):
     # SubAgent 本身输出的 assistant content（流式到达时以 text(stepId) 事件推送；
     # 历史回放时一次性随 Step 下发，供前端补绘阶段文本）
     textContent: str = ""
-    thinkingContent: str = ""
 
 
 # ─── 右侧渲染块 ───────────────────────────────────────────────────────────────
