@@ -208,13 +208,25 @@ async def _adapt_body(
     steps_by_id: dict[str, StepAggregate] = {}
 
     def _step_for_event(event: Any, leader: bool) -> Optional[StepAggregate]:
-        """根据事件的 agent_id 找对应 step；leader 事件返回 None（归属顶层）。"""
+        """根据事件的 agent 标识找对应 step；leader 事件返回 None（归属顶层）。
+
+        agno Agent(name=...) 只设 name，agent_id 由 agno 默认给 UUID。
+        不同事件类型对 event.agent_id / event.agent_name 的赋值并不统一，
+        例如 ToolCall 类事件往往带 name，而 ReasoningContentDelta /
+        RunContent 可能只带 UUID。此处**同时尝试 name 与 id 两个属性**，
+        任意一个归一化后能在 steps_by_id 命中即采用，消除属性不一致导致
+        的 stepId 丢失（表现为 3 张卡片里没有 thinking / 过程文字）。
+        """
         if leader:
             return None
-        sid = _source_id(event, leader=False)
-        if not sid:
-            return None
-        return steps_by_id.get(_canonical_member_id(sid))
+        for attr in ("agent_name", "agent_id"):
+            v = getattr(event, attr, None)
+            if not v:
+                continue
+            step = steps_by_id.get(_canonical_member_id(str(v)))
+            if step is not None:
+                return step
+        return None
 
     # ── trace 段级化状态 ────────────────────────────────────────────────────
     # thinking 与 member content 都按 token 流式到达；按段（source 切换 / 工具
@@ -424,9 +436,14 @@ async def _adapt_body(
                 result_raw = getattr(tool, "result", None) or ""
                 stdout, stderr = _extract_stdout_stderr(result_raw)
 
-                # 用 event.agent_id（非 leader）查对应 step，不再依赖 active_step
+                # 用 _step_for_event 查对应 step（同时尝试 agent_name / agent_id），
+                # fallback 也优先用 agent_name 归一化，避免 agent_id 是 UUID 时跑偏
                 step_for_evt = _step_for_event(event, leader=False)
-                step_id = step_for_evt.step_id if step_for_evt else _canonical_member_id(agent_id)
+                if step_for_evt is not None:
+                    step_id = step_for_evt.step_id
+                else:
+                    raw_name = getattr(event, "agent_name", None) or agent_id
+                    step_id = _canonical_member_id(str(raw_name))
                 sub_step_id = f"{step_id}_{skill_name}"
                 completed_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
