@@ -51,7 +51,7 @@ _DEFAULTS: dict[str, Any] = {
     "ap_count": 1,
     "grid_size": 40,
     "target_ap_count": 3,
-    "show_doors": False,
+    "show_doors": True,
 }
 
 
@@ -101,7 +101,7 @@ def _run(params: dict[str, Any]) -> dict[str, Any]:
     ap = params["ap_count"]
     grid = params["grid_size"]
     target_ap = params["target_ap_count"]
-    show_doors = bool(params.get("show_doors", False))
+    show_doors = bool(params.get("show_doors", True))
 
     # 始终产出：2 张对比 PNG + 4 份 JSON 矩阵（补点前/后 × RSSI/卡顿率）
     result = _engine.generate_ap_optimization_comparison(
