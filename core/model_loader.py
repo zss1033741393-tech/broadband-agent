@@ -177,9 +177,13 @@ def inject_dynamic_seed(model) -> None:
 
     async def _seeded_ainvoke_stream(self, messages, *args, **kwargs):
         # 合并随机 seed 到现有 request_params，保留静态参数
+        # 上限使用 2**53-1（IEEE 754 double 安全整数范围）而非 2**63-1：
+        # 超过此值的 Python int 经过 JSON 序列化再由 JavaScript / float64 解析后
+        # 会变成浮点数（9.22e18），百炼服务端收到 float 后报 "must be Integer"。
+        _SEED_MAX = 9007199254740991  # 2**53 - 1
         self.request_params = {
             **(getattr(self, "request_params", None) or {}),
-            "seed": random.randint(0, 2**63 - 1),
+            "seed": random.randint(0, _SEED_MAX),
         }
         if _is_bound:
             # 调用已绑定的实例方法（无需再传 self）
