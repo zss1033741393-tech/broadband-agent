@@ -3,9 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-import sys
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import AsyncGenerator
 
 from fastapi import APIRouter, HTTPException
@@ -13,14 +11,9 @@ from fastapi.responses import StreamingResponse
 from loguru import logger
 from pydantic import BaseModel
 
-# 将 FAE_demo 根目录加入 sys.path，使 src.engine 可 import
-_FAE_ROOT = Path("C:/Users/angli/FAE_demo")
-if str(_FAE_ROOT) not in sys.path:
-    sys.path.insert(0, str(_FAE_ROOT))
-
-from src.engine import SimulationEngine  # noqa: E402
-from src.faults import FaultConfig, FAULT_CATALOG  # noqa: E402
-from src.params.schema import SimParams  # noqa: E402
+from src.engine import SimulationEngine
+from src.faults import FaultConfig, FAULT_CATALOG
+from src.params.schema import SimParams
 
 from api.sse import format_sse
 
