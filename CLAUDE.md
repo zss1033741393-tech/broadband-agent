@@ -13,7 +13,8 @@
 - Agent 行为修改 → 只改 `prompts/` 或 `configs/agents.yaml`
 - 可观测性修改 → 只改 `core/observability/`
 - 数据层修改 → 只改 DB schema 和 repository
-- 前端修改 → 只改 `ui/`
+- API 层修改 → 只改 `api/`（为 huangxn27/broadband-agent-demo 前端服务的 FastAPI 后端）
+- 前端修改 → 只改 `ui/`（Gradio 内嵌 UI）
 
 **不为未来写代码**：不添加"将来可能用到"的抽象、开关或兼容层；三处相似代码优于一个过早的封装。
 
