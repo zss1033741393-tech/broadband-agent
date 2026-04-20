@@ -17,7 +17,7 @@
 OrchestratorTeam (leader, coordinate 模式)
   ├─ PlanningAgent            (goal_parsing + plan_design + plan_review + plan_store)
   ├─ InsightAgent             (insight_plan + insight_decompose + insight_query
-  ���                            + insight_nl2code + insight_reflect + insight_report)
+  │                              + insight_nl2code + insight_reflect + insight_report)
   ├─ ProvisioningWifiAgent    (wifi_simulation)              ← 单 Skill 内部 2 能力 (RSSI 热力图 + 卡顿率栅格) ± AP 补点对比
   ├─ ProvisioningDeliveryAgent (experience_assurance)
   └─ ProvisioningCeiChainAgent (cei_pipeline + cei_score_query
