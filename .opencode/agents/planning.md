@@ -4,8 +4,8 @@ description: >
   + 方案评审(plan_review) + 方案持久化(plan_store)，
   产出分段 Markdown 方案。
 mode: subagent
-# model: 继承自 opencode.json 顶层配置
-temperature: 0.3
+model: dashscope/qwen3.5-397b-a17b
+temperature: 0.6
 permission:
   bash: allow
   skill: allow
