@@ -3,8 +3,8 @@ description: >
   家宽网络调优 Orchestrator：识别用户意图，路由到正确的专家 agent，
   拆分复合任务，汇总执行结果。不直接调用 Skill 脚本。
 mode: primary
-# model: 继承自 opencode.json 顶层配置
-temperature: 0.3
+model: dashscope/qwen3.5-397b-a17b
+temperature: 0.6
 permission:
   task: allow
   bash: deny
