@@ -3,8 +3,8 @@ description: >
   WIFI 仿真执行专家：驱动户型图识别→热力图→RSSI 采集→选点对比 4 步流水线。
   接收 PlanningAgent 产出的 WIFI 仿真段方案，按 Skill schema 提参并执行。
 mode: subagent
-# model: 继承自 opencode.json 顶层配置
-temperature: 0.3
+model: dashscope/qwen3.5-397b-a17b
+temperature: 0.6
 permission:
   bash: allow
   skill: allow
