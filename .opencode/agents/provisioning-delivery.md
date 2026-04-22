@@ -3,8 +3,8 @@ description: >
   差异化承载执行专家：切片配置与应用白名单 (Appflow / 抖音切片等)，
   底层调用 FAN 网络切片服务 experience_assurance 接口。
 mode: subagent
-# model: 继承自 opencode.json 顶层配置
-temperature: 0.3
+model: dashscope/qwen3.5-397b-a17b
+temperature: 0.6
 permission:
   bash: allow
   skill: allow
