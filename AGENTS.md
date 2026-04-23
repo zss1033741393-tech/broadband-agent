@@ -18,9 +18,18 @@
 - `args`：字符串数组，传给脚本的命令行参数，如 `['{"table":"day"}']`
 - `timeout`：超时秒数，默认 60
 
-## 🔴 Python 执行规则（必须遵守）
-**所有 Python 脚本必须通过 `uv run python` 执行，禁止使用裸 `python` 命令。**
-这是因为项目依赖（含 vendor/ce_insight_core）通过 uv 虚拟环境管理，裸 `python` 找不到这些包会直接报错。
+### 正确示例
+get_skill_script(skill_name="insight_query", script_path="run_insight.py", execute=true, args=['{"insight_type":"OutstandingMin",...}'])
+get_skill_script(skill_name="goal_parsing", script_path="slot_engine.py", execute=true, args=["<user_input>", "<state_json>"])
+
+### 禁止的方式
+❌ bash tool：uv run python skills/insight_query/scripts/run_insight.py '{"insight_type":...}'
+❌ 绝对路径：D:\CodeWork\broadband-agent\skills...
+❌ 裸 python：python skills/...
+
+### 何时可以用 bash tool
+- 非 Python 脚本的命令（如 git、ls、cat 等）
+- 环境检查命令（如 uv sync、pip list）
 
 ## Agent 协作规则
 - 决策型 Agent (Planning / Insight) 产出方案或报告，**不执行**配置下发
