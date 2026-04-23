@@ -8,29 +8,19 @@
 - 所有 skill 脚本在 `skills/*/scripts/` 目录，通过 bash 调用
 - 下游接口 mock/real 切换见 `configs/downstream.yaml`
 
+## 🔴 Skill 脚本执行规范 （必须遵守） 
+
+**所有 skill 脚本必须通过 `get_skill_script` 工具执行，禁止使用 bash tool 调用 Python 脚本。**
+`get_skill_script` 工具参数与 agno 完全一致：
+- `skill_name`：skill 目录名，如 `"insight_query"`
+- `script_path`：脚本文件名，如 `"run_insight.py"`
+- `execute`：设为 `true` 执行脚本，`false` 读取脚本内容
+- `args`：字符串数组，传给脚本的命令行参数，如 `['{"table":"day"}']`
+- `timeout`：超时秒数，默认 60
+
 ## 🔴 Python 执行规则（必须遵守）
 **所有 Python 脚本必须通过 `uv run python` 执行，禁止使用裸 `python` 命令。**
 这是因为项目依赖（含 vendor/ce_insight_core）通过 uv 虚拟环境管理，裸 `python` 找不到这些包会直接报错。
-
-正确示例：`uv run python skills/goal_parsing/scripts/slot_engine.py "<args>"`
-错误示例：`python skills/goal_parsing/scripts/slot_engine.py "<args>"`
-
-## 🔴 Bash Tool 路径规则（Windows 环境必须遵守）
-1. **永远使用相对路径**，从项目根目录出发，禁止使用绝对路径：
-   - ✅ `uv run python skills/insight_query/scripts/run_insight.py '<json>'`
-   - ❌ `uv run python D:\CodeWork\broadband-agent\skills\insight_query\scripts\run_insight.py '<json>'`
-2. **路径分隔符永远用 `/`**，禁止使用 `\`：
-   - ✅ `skills/insight_decompose/scripts/list_schema.py`
-   - ❌ `skills\insight_decompose\scripts\list_schema.py`
-3. **JSON 参数用单引号包裹外层**，内部正常双引号，禁止用 `\"` 转义：
-   - ✅ `uv run python skills/xxx.py '{"table": "day"}'`
-   - ❌ `uv run python skills/xxx.py "{\"table\": \"day\"}"`
-
-## Skill 脚本调用规范
-- 脚本参数为 JSON 字符串，通过命令行参数传入
-- 脚本输出为 JSON 到 stdout，作为最终结果
-- Generator 范式脚本的 stdout **禁止二次改写**，须原样输出
-- 调用形式：`uv run python skills/<skill_name>/scripts/<script>.py <args...>`
 
 ## Agent 协作规则
 - 决策型 Agent (Planning / Insight) 产出方案或报告，**不执行**配置下发
