@@ -64,12 +64,24 @@ export default tool({
       }
     }
 
+    // ── 防御 4：自动修正 script_path 常见错误 ──
+    // 模型有时会传 "scripts/read_plan.py" 或 "plan_store/scripts/read_plan.py"
+    // 我们内部已经拼了 skills/<name>/scripts/，所以只需要纯文件名
+    let scriptName = input.script_path
+    if (scriptName.includes("/")) {
+      // 取最后一段作为文件名: "scripts/read_plan.py" → "read_plan.py"
+      scriptName = scriptName.split("/").pop()!
+    }
+    if (scriptName.includes("\\")) {
+      scriptName = scriptName.split("\\").pop()!
+    }
+
     const scriptFile = path.join(
       context.worktree,
       "skills",
       input.skill_name,
       "scripts",
-      input.script_path
+      scriptName
     )
 
     // ── 防御 3：检查脚本文件是否存在 ──
@@ -83,7 +95,7 @@ export default tool({
         const files = await fs.readdir(scriptsDir)
         const pyFiles = files.filter((f: string) => f.endsWith(".py"))
         return [
-          `Error: Script "${input.script_path}" not found in skill "${input.skill_name}".`,
+          `Error: Script "${scriptName}" not found in skill "${input.skill_name}".`,
           `Available scripts:`,
           ...pyFiles.map((f: string) => `  - ${f}`),
         ].join("\n")
@@ -112,7 +124,13 @@ export default tool({
         {
           cwd: context.worktree,
           shell: false,
-          env: process.env,
+          env: {
+            ...process.env,
+            // Windows 上 Python 默认用系统代码页(GBK)输出，
+            // 强制 UTF-8 确保 Node.js 能正确解码中文
+            PYTHONIOENCODING: "utf-8",
+            PYTHONUTF8: "1",
+          },
         }
       )
 
@@ -120,7 +138,7 @@ export default tool({
         child.kill()
         resolve(
           `ERROR: Script execution timed out after ${input.timeout}s.\n` +
-          `Script: ${input.skill_name}/scripts/${input.script_path}\n` +
+          `Script: ${input.skill_name}/scripts/${scriptName}\n` +
           `Consider increasing timeout parameter.`
         )
       }, timeoutMs)
