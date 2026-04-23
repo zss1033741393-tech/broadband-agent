@@ -5,15 +5,21 @@
 
 ## 环境准备
 - Python 3.11+，使用 uv 管理依赖
-- 启动前执行 `uv sync` 安装全部依赖（含 vendor/ce_insight_core editable 安装）
-- 所有 skill 脚本在 `skills/*/scripts/` 目录，通过 bash 直接调用
+- 所有 skill 脚本在 `skills/*/scripts/` 目录，通过 bash 调用
 - 下游接口 mock/real 切换见 `configs/downstream.yaml`
+
+## 🔴 Python 执行规则（必须遵守）
+**所有 Python 脚本必须通过 `uv run python` 执行，禁止使用裸 `python` 命令。**
+这是因为项目依赖（含 vendor/ce_insight_core）通过 uv 虚拟环境管理，裸 `python` 找不到这些包会直接报错。
+
+正确示例：`uv run python skills/goal_parsing/scripts/slot_engine.py "<args>"`
+错误示例：`python skills/goal_parsing/scripts/slot_engine.py "<args>"`
 
 ## Skill 脚本调用规范
 - 脚本参数为 JSON 字符串，通过命令行参数传入
 - 脚本输出为 JSON 到 stdout，作为最终结果
 - Generator 范式脚本的 stdout **禁止二次改写**，须原样输出
-- 调用形式：`python skills/<skill_name>/scripts/<script>.py <args...>`
+- 调用形式：`uv run python skills/<skill_name>/scripts/<script>.py <args...>`
 
 ## Agent 协作规则
 - 决策型 Agent (Planning / Insight) 产出方案或报告，**不执行**配置下发
