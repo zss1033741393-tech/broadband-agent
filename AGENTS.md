@@ -15,6 +15,17 @@
 正确示例：`uv run python skills/goal_parsing/scripts/slot_engine.py "<args>"`
 错误示例：`python skills/goal_parsing/scripts/slot_engine.py "<args>"`
 
+## 🔴 Bash Tool 路径规则（Windows 环境必须遵守）
+1. **永远使用相对路径**，从项目根目录出发，禁止使用绝对路径：
+   - ✅ `uv run python skills/insight_query/scripts/run_insight.py '<json>'`
+   - ❌ `uv run python D:\CodeWork\broadband-agent\skills\insight_query\scripts\run_insight.py '<json>'`
+2. **路径分隔符永远用 `/`**，禁止使用 `\`：
+   - ✅ `skills/insight_decompose/scripts/list_schema.py`
+   - ❌ `skills\insight_decompose\scripts\list_schema.py`
+3. **JSON 参数用单引号包裹外层**，内部正常双引号，禁止用 `\"` 转义：
+   - ✅ `uv run python skills/xxx.py '{"table": "day"}'`
+   - ❌ `uv run python skills/xxx.py "{\"table\": \"day\"}"`
+
 ## Skill 脚本调用规范
 - 脚本参数为 JSON 字符串，通过命令行参数传入
 - 脚本输出为 JSON 到 stdout，作为最终结果
