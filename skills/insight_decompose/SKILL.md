@@ -44,34 +44,34 @@ payload：
 
 ### Step 3 — 生成 Step 数组
 
-输出分两层：
-
-**3a · 事件标记**（前端渲染用，仅含摘要字段，**不得**包含 `query_config`，避免 token 膨胀）：
+输出 `decompose_result` 事件，含完整 step 定义（Execute 阶段直接复制，不再单独保留内部数组）：
 
 ```
 <!--event:decompose_result-->
-{"phase_id": 1, "total_steps": 4, "steps": [{"step": 1, "insight_types": ["OutstandingMin"], "rationale": "找 CEI 最低值"}, {"step": 2, "insight_types": ["Attribution"], "rationale": "归因分析"}]}
+{
+  "phase_id": 1,
+  "total_steps": 2,
+  "table_level": "day",
+  "steps": [
+    {
+      "step_id": 1,
+      "step_name": "找出 CEI_score 最低的 PON 口",
+      "insight_type": "OutstandingMin",
+      "rationale": "找 CEI 最低值",
+      "query_config": {
+        "dimensions": [[]],
+        "breakdown": {"name": "portUuid", "type": "UNORDERED"},
+        "measures": [{"name": "CEI_score", "aggr": "AVG"}]
+      }
+    }
+  ]
+}
 ```
 
-事件 JSON 必填字段：`phase_id`、`total_steps`、`steps[]`，每个 step 含 `step`（编号）+ `insight_types`（字符串数组）+ `rationale`（一句话目的）。
+必填字段：`phase_id`、`total_steps`、`table_level`、`steps[]`，每个 step 含 `step_id`、`step_name`、`insight_type`（单字符串）、`rationale`、`query_config`。
 
-**3b · 内部完整 Step 数组**（不进事件，仅在 LLM context 内保留供 Execute 阶段调用）：
+Execute 阶段直接从 `decompose_result.steps[]` 复制构造 `run_phase.py` 的 payload，禁止重建或筛选。
 
-```json
-[
-  {
-    "step": 1,
-    "insight_types": ["OutstandingMin"],
-    "query_config": {
-      "dimensions": [[]],
-      "breakdown": {"name": "portUuid", "type": "UNORDERED"},
-      "measures": [{"name": "CEI_score", "aggr": "AVG"}]
-    },
-    "output_ref": "step1_output",
-    "rationale": "找出 CEI_score 最低的 PON 口"
-  }
-]
-```
 
 ### 步骤数量规则
 | 里程碑类型 | 步骤数 |

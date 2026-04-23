@@ -89,13 +89,13 @@ payload 字段：`phase_id`、`phase_name`、`table_level`、`steps[]`（含 `st
 {"phase_id": 1, "name": "定位低分PON口", "status": "running"}
 ```
 
-**`run_phase.py` 返回后**，从 `results[]` 逐步读取，对每个 result 在同一次回复内连续输出 `step_result` 事件：
+**`run_phase.py` 返回后**，输出一条 `phase_complete` 事件，包含所有 Step 结果：
 ```
-<!--event:step_result-->
-{"phase_id": 1, "step_id": 1, "insight_type": "OutstandingMin", "significance": 0.73, "summary": "CEI_score 最小值出现在 uuid-a（54.08）", "found_entities": {"portUuid": ["uuid-a", "uuid-b"]}, "status": "ok"}
+<!--event:phase_complete-->
+{"phase_id": 1, "steps": [{"step_id": 1, "status": "ok", "significance": 0.73, "summary": "..."}, {"step_id": 2, "status": "error", "summary": "执行失败原因"}]}
 ```
 
-> 🔴 **`step_result` 必须独立输出，不被 stdout 替代**：`run_phase.py` 的 stdout 由框架自动展示（图表渲染通道）；`step_result` 是独立的进度追踪信号，前端进度条依赖它。`run_phase.py` 返回后，必须在同一次回复内对每个 result 连续输出对应的 `step_result`，缺失会导致进度跟踪失败。`done` 事件同理。
+> `found_entities` 从 `results[i]` 中读取，供后续 Phase 下钻使用，无需放入事件。
 
 ### 纯数据查询
 ```

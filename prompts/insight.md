@@ -271,7 +271,7 @@ Report (1 次)
 | `plan` | Plan 阶段完成后 | `goal`, `total_phases`, `phases[]` |
 | `decompose_result` | 每 Phase Decompose 后 | `phase_id`, `total_steps`, `steps[]` |
 | `phase_start` | 每 Phase Execute 开始前 | `phase_id`, `name`, `status` |
-| `step_result` | 每 Step 脚本执行后 | `phase_id`, `step_id`, `insight_type`, `significance`, `summary`, `found_entities` |
+| `phase_complete` | `run_phase.py` 返回后（一条，含所有 Step 结果） | `phase_id`, `steps[]`（每步含 `step_id`/`status`/`significance`/`summary`） |
 | `reflect` | 每 Phase 所有 Step 完成后 | `phase_id`, `choice`, `reason` |
 | `done` | Report 阶段完成后 | `total_phases`, `total_steps`, `total_charts` |
 
@@ -280,6 +280,8 @@ Report (1 次)
 - **summary JSON**：Report 末尾的独立 JSON 代码块，供 Orchestrator 提取
 
 **执行时序**：`plan` → [`decompose_result` → `phase_start` → 调脚本 → `step_result` × M → `reflect`] × N Phase → `done`
+
+🔴 **payload.steps[] 必须直接从 decompose_result.steps[] 复制**：调 `run_phase.py` 时，`steps[]` 直接复制 `decompose_result` 事件里的 steps 数组（含 `query_config`），加上 `phase_id`/`phase_name`/`table_level` 即构成完整 payload，禁止重建或筛选。
 
 🔴 **禁止重复输出**：`<!--event:xxx-->` JSON 会被前端自动渲染为结构化表格/摘要。输出事件标记后，**禁止**再手写 Markdown 表格、列表或其他重复展示同一数据的内容。只需紧跟一句话指针即可（见 §8.2）。
 
@@ -374,24 +376,42 @@ Report (1 次)
    - `references/triple_schema.md` — 三元组硬约束
    - `references/decompose_fewshots.md` — Layer 3 根因 fewshot + 步骤数建议
 
-3. **拆步骤**并 🔴 **输出 `decompose_result` 事件**（让用户感知 Decompose 阶段进度）：
+3. **拆步骤**并 🔴 **输出 `decompose_result` 事件**（单一来源，含完整 step 定义，Execute 阶段直接复制使用）：
    ```
    <!--event:decompose_result-->
-   {"phase_id": 1, "total_steps": 4, "steps": [{"step": 1, "insight_types": ["OutstandingMin"], "rationale": "找 CEI 最低值"}, {"step": 2, "insight_types": ["Attribution"], "rationale": "归因分析"}]}
+   {
+     "phase_id": 1,
+     "total_steps": 2,
+     "table_level": "day",
+     "steps": [
+       {
+         "step_id": 1,
+         "step_name": "找出 CEI_score 最低的 PON 口",
+         "insight_type": "OutstandingMin",
+         "rationale": "找 CEI 最低值",
+         "query_config": {
+           "dimensions": [[]],
+           "breakdown": {"name": "portUuid", "type": "UNORDERED"},
+           "measures": [{"name": "CEI_score", "aggr": "AVG"}]
+         }
+       },
+       {
+         "step_id": 2,
+         "step_name": "分析各 PON 口对 CEI 均值的贡献度",
+         "insight_type": "Attribution",
+         "rationale": "归因分析",
+         "query_config": {
+           "dimensions": [[]],
+           "breakdown": {"name": "portUuid", "type": "UNORDERED"},
+           "measures": [{"name": "CEI_score", "aggr": "AVG"}]
+         }
+       }
+     ]
+   }
    ```
-   事件中只含 step 编号 + insight_types + rationale 摘要，**不含完整 query_config**（避免 token 膨胀）。
-   完整 Step 数组（含 query_config）内部保留，用于后续 Execute 阶段调用：
-   ```json
-   [
-     {
-       "step": 1,
-       "insight_types": ["OutstandingMin"],
-       "query_config": {...},
-       "output_ref": "step1_output",
-       "rationale": "..."
-     }
-   ]
-   ```
+   必填字段：`phase_id`、`total_steps`、`table_level`、`steps[]`，每个 step 含 `step_id`、`step_name`、`insight_type`（单字符串）、`rationale`、`query_config`（完整三元组）。
+
+   不再有「内部完整 Step 数组」单独保留——步骤完整定义已在事件中，Execute 阶段直接从此事件复制。
 
 ### 步骤数量上限
 - 简单查询 Phase：1-3 步
@@ -472,15 +492,34 @@ get_skill_script("insight_query", "run_phase.py", execute=True, args=[
    <!--event:phase_start-->
    {"phase_id": 1, "name": "定位低分PON口", "status": "running"}
    ```
-2. **`step_result`** — 每个 Step 脚本调用**完成后**，必须在 assistant 文本中输出，**必须包含 `phase_id` 和 `step_id`**：
+2. **`phase_complete`** — `run_phase.py` 返回后输出**一条**，包含该 Phase 所有 Step 结果：
    ```
-   <!--event:step_result-->
-   {"phase_id": 1, "step_id": 1, "phase_name": "定位低分PON口", "step_name": "找出 CEI_score 最低的 PON 口", "insight_type": "OutstandingMin", "significance": 0.73, "summary": "CEI_score 最小值出现在 288b6c71-...（54.08）", "found_entities": {"portUuid": ["288b6c71-...", "1c86d285-..."]}, "status": "ok"}
+   <!--event:phase_complete-->
+   {"phase_id": 1, "steps": [{"step_id": 1, "status": "ok", "significance": 0.73, "summary": "CEI_score 最小值出现在 288b6c71-...（54.08）"}, {"step_id": 2, "status": "ok", "significance": 0.45, "summary": "..."}]}
    ```
-   > ⚠️ 脚本 stdout 被框架自动展示（图表渲染用），**不等于** `step_result` 事件。即使 stdout 已展示，`step_result` 仍必须单独在 assistant 文本中输出；缺失会导致前端进度条跟踪失败。
+   前端收到后所有 step 一次性标为完成，不再需要逐步输出 `step_result`。
 3. **`reflect`** — 每个 Phase 所有 Step 执行完后输出（最后一个 Phase 无后续 Phase 时可跳过）
 
-**执行时序**：`phase_start`（文本，工具调用**之前**输出）→ 调 `run_phase.py`（**单次**工具调用，传入 Phase 全部标准 Step）→ 从 `results[]` 逐步读取，在**同一次回复内**连续输出 `step_result` × N（文本）→ `reflect`（文本，**每个 Phase 必须，最后一个 Phase next_phase 填 null**）→ 下一个 Phase 的 `phase_start`（文本）→ ...
+**执行时序**：`phase_start`（文本，工具调用**之前**输出）→ 调 `run_phase.py`（**单次**工具调用，传入 Phase 全部标准 Step）→ 输出一条 `phase_complete`（文本，含所有 Step 结果）→ `reflect`（文本，**每个 Phase 必须，最后一个 Phase next_phase 填 null**）→ 下一个 Phase 的 `phase_start`（文本）→ ...
+
+🔴 **`run_phase.py` 只调用一次，返回后输出一条 `phase_complete`，不分批，不补发。**
+
+✅ 正确：读完 `results[]` 所有条目，输出一条 `phase_complete` 事件包含所有 Step 结果。对 `status:"error"` 的条目才用单步 `run_phase.py` 重试。
+
+❌ 错误（绝对禁止，调用后补发）：
+```
+"Step 1 成功了，继续执行 Step 2 和 Step 3。"
+→ 再次调用 run_phase.py(steps=[step2, step3])
+```
+`run_phase.py` 在同一进程内已经执行了全部步骤，Step 2 和 Step 3 已经在 `results[1]` 和 `results[2]` 里，直接读取即可。
+
+❌ 同样禁止（调用前分批构造）：
+```
+→ call run_phase.py(steps=[step1])
+→ 看 step1 结果
+→ call run_phase.py(steps=[step2])
+```
+Decompose 阶段已生成所有 Step 的完整 query_config，Execute 开始时直接打包进 steps[]，一次调用，不分批。
 
 ### 每步的调用模式
 
