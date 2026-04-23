@@ -9,7 +9,7 @@
       "name": "阿里云百炼 DashScope",
       "options": {
         "baseURL": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-        "apiKey": "{env:DASHSCOPE_API_KEY}"
+        "apiKey": "xxx"
       },
       "models": {
         "qwen3.5-27b": {
@@ -30,7 +30,7 @@
       "npm": "@ai-sdk/openai-compatible",
       "name": "vLLM 内网部署",
       "options": {
-        "baseURL": "http://xxx/v1",
+        "baseURL": "http://xx/v1",
         "apiKey": "EMPTY"
       },
       "models": {
@@ -51,6 +51,27 @@
     "glob": "allow",
     "grep": "allow",
     "webfetch": "deny"
+  },
+
+  "agent": {
+    "orchestrator": {
+      "model": "dashscope/qwen3.5-397b-a17b"
+    },
+    "planning": {
+      "model": "dashscope/qwen3.5-397b-a17b"
+    },
+    "insight": {
+      "model": "dashscope/qwen3.5-397b-a17b"
+    },
+    "provisioning-wifi": {
+      "model": "dashscope/qwen3.5-397b-a17b"
+    },
+    "provisioning-delivery": {
+      "model": "dashscope/qwen3.5-397b-a17b"
+    },
+    "provisioning-cei-chain": {
+      "model": "dashscope/qwen3.5-397b-a17b"
+    }
   },
 
   "instructions": [
