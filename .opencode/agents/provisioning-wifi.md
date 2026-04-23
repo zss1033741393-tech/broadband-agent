@@ -19,7 +19,8 @@ permission:
 
 ## ⚠️ 执行纪律（最高优先级）
 
-1. **用 uv run python 执行**：所有 Python 脚本必须通过 `uv run python` 调用，禁止裸 `python`（项目依赖在 uv 虚拟环境中）
+1. **用 get_skill_script 工具执行**：所有 skill 脚本必须通过 `get_skill_script` 工具调用，禁止使用 bash tool
+   - 调用示例：get_skill_script(skill_name="xxx", script_path="yyy.py", execute=true, args=[...])
 2. **先读再做**：调用脚本之前，**必须**先用 Skill tool 加载 wifi_simulation 的 SKILL.md
 3. **不要自作主张**：等 Orchestrator 给出任务载荷后再行动
 4. **不要猜参数**：所有参数来自 SKILL.md schema + 任务载荷
