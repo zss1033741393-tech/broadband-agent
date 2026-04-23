@@ -4,7 +4,7 @@ description: >
   的顺序串行 workflow，每步基于上一步上下文自适应推导参数。
 mode: subagent
 model: dashscope/qwen3.5-397b-a17b
-temperature: 0.3
+temperature: 0.6
 permission:
   bash: allow
   skill: allow
