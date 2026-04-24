@@ -129,30 +129,34 @@ permission:
 4. 每个 Phase 执行完毕后**必须输出 reflect 事件**（包括最后一个 Phase）
 5. 进入 Phase N (N≥2) 的 Decompose 之前**必须先完成 Phase N-1 的 Reflect**
 6. Report 阶段失败**必须兜底**：用 Markdown 直接输出完整报告，禁止只输出错误信息
+7. **`args` 是 Python list 不是 string** — `args=['{...}']` 而非 `args='["{...}"]'`
+8. **禁止在 Phase 与 Phase 之间停下询问用户是否继续**
 
 ### 5.1 Plan
 
 1. 用 Skill tool 加载 insight_plan 的 SKILL.md
 2. 按 SKILL.md 说明判断任务类型、确定 Phase 划分
-3. 在 assistant 消息中输出 MacroPlan（**必须先输出再开始 Decompose**）
+3. 在 assistant 消息中输出 MacroPlan（**必须先输出 `<!--event:plan-->` 再开始 Decompose**）
 
 ### 5.2 Decompose（每 Phase 一次）
 
 1. 用 Skill tool 加载 insight_decompose 的 SKILL.md
-2. 若需查字段合法性，按 SKILL.md 说明调用 schema 查询脚本
-3. 按 SKILL.md 说明和参考文件，为当前 Phase 拆 1-8 个 Step
+2. 若需查字段合法性，按 SKILL.md 说明调用 `list_schema.py`
+3. 按 SKILL.md 说明和参考文件，为当前 Phase 拆 1-8 个 Step，输出 `<!--event:decompose_result-->`
 
-### 5.3 Execute（逐 Step）
+### 5.3 Execute（批量执行）
 
-按 Decompose 产出的 Step 列表**逐个**执行：
-1. 根据 Step 类型，加载对应 skill 的 SKILL.md（insight_query / insight_nl2code）
-2. 按 SKILL.md 说明调用脚本
-3. **检查返回结果后再执行下一个 Step**，失败可重试 ≤ 1 次
+通过 `run_phase.py` **一次调用**执行 Phase 内所有标准 Step：
+1. 加载 insight_query 的 SKILL.md
+2. 直接从 `decompose_result.steps[]` 复制构造 payload，禁止重建或筛选
+3. 调用 `run_phase.py`，返回后输出 `<!--event:phase_complete-->`
+4. NL2Code step **不放入** `run_phase.py`，单独调 `run_nl2code.py`
+5. 某 step 失败时，可用 `run_phase.py` 传单个 step 重试 ≤ 1 次
 
 ### 5.4 Reflect（每 Phase 结束后）
 
 1. 用 Skill tool 加载 insight_reflect 的 SKILL.md
-2. 按 SKILL.md 说明进行阶段反思，输出 reflect 事件
+2. 按 SKILL.md 说明进行阶段反思，输出 `<!--event:reflect-->`
 3. 决定 A(继续) / B(修改下一 Phase) / C(插入 Phase) / D(跳过)
 4. 根因分析类任务禁止轻易选 D
 
@@ -161,9 +165,8 @@ permission:
 1. 用 Skill tool 加载 insight_report 的 SKILL.md
 2. 按 SKILL.md 说明调用脚本
 3. stdout 产出的报告 Markdown **必须原样输出，禁止二次改写**
-4. 同时输出 summary JSON 代码块（结构化交接契约，供任务 A 回流用）
-
-**Report 兜底（铁律 6）**：若脚本崩溃，禁止只输出错误信息；必须用 Markdown 直接输出完整报告 + summary JSON（所有 Phase 结果都在上下文里）。
+4. 同时输出 summary JSON 代码块（结构化交接契约）+ `<!--event:done-->`
+5. 🔴 **兜底**：若脚本崩溃，用 Markdown 直接输出完整报告 + summary JSON
 
 ### 5.6 回流到方案规划
 
@@ -184,6 +187,7 @@ hints 足够时零追问；关键字段缺失且无法推断才追问 1 次。
 - ❌ 不改写 chart_configs / filter_data / found_entities / insight_report 的 stdout
 - ❌ 不在任务 B 里生成调优方案
 - ❌ 不合并 L2+L3 到同一 Phase
+- ❌ NL2Code 代码由你自己写，重试 ≤ 1 次
 
 ---
 
