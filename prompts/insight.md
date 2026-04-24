@@ -239,7 +239,7 @@ Plan (1 次)
   ▼
 ┌─ Phase 循环（N 次，N = MacroPlan.phases 长度）────────────────┐
 │  Decompose → 输出: <!--event:decompose_result--> Step 数组摘要  │
-│  Execute   → 输出: <!--event:step_result--> × M 步              │
+│  Execute   → 输出: <!--event:phase_complete--> × 1              │
 │  Reflect   → 输出: <!--event:reflect--> 决策 A/B/C/D            │
 └──────────────────────────────────────────────────────────────────┘
   │
@@ -543,7 +543,7 @@ get_skill_script(
 )
 ```
 
-payload 包含 `phase_id`、`phase_name`、`table_level`、`steps[]`；`steps[]` 中每个 step 含 `step_id`、`step_name`、`insight_type`、`query_config`。工具返回后从 `results[]` 逐项读取，在**同一次回复内**对每个 result 连续输出 `step_result` 事件；`phase_id`、`step_id`、`found_entities` 等字段来自 `results[i]` 原样透传。
+payload 包含 `phase_id`、`phase_name`、`table_level`、`steps[]`；`steps[]` 中每个 step 含 `step_id`、`step_name`、`insight_type`、`query_config`。工具返回后读取 `results[]`，在**同一次回复内**输出一条 `phase_complete` 事件，包含所有 Step 结果；`found_entities` 等字段来自 `results[i]`。
 
 🔴 **NL2Code step 不放入 `run_phase.py`**：如果某 Phase 含有 NL2Code step，先调 `run_phase.py` 处理所有标准 step，再单独调 `run_nl2code.py`。
 
@@ -733,10 +733,10 @@ InsightAgent 产出 3 类输出，各自独立、互不替代：
 - stdout 中的 `phase_id` / `step_id` 字段用于关联 step_result 事件
 - **禁止**在 assistant 文本中复述脚本 stdout 的完整内容
 
-> 🔴 **stdout 自动展示 ≠ `step_result` 事件，两者不可互相替代**
+> 🔴 **stdout 自动展示 ≠ `phase_complete` 事件，两者不可互相替代**
 > - **脚本 stdout**（自动展示）= 图表渲染通道，供前端渲染 ECharts / 数据表格
-> - **`<!--event:step_result-->`**（assistant 文本）= 进度追踪通道，供前端进度条感知每步完成状态
-> - 即使脚本已成功执行且 stdout 已自动展示，**`step_result` 事件仍然必须在 assistant 文本中单独输出**，缺失会导致前端进度条跟踪失败。`done` 事件同理。
+> - **`<!--event:phase_complete-->`**（assistant 文本）= 进度追踪通道，供前端进度条一次性标记所有 Step 完成
+> - 即使脚本已成功执行且 stdout 已自动展示，**`phase_complete` 事件仍然必须在 assistant 文本中单独输出**，缺失会导致前端进度条跟踪失败。`done` 事件同理。
 
 ### 8.2 事件标记（assistant 文本中输出）
 - 按 §2「事件输出协议」在 assistant 文本中输出 `<!--event:xxx-->` + JSON
