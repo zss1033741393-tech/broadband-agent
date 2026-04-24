@@ -76,6 +76,9 @@
     },
     "provisioning-cei-chain": {
       "model": "dashscope/qwen3.5-397b-a17b"
+    },
+    "home-broadband": {
+      "model": "dashscope/qwen3.5-397b-a17b"
     }
   },
 
