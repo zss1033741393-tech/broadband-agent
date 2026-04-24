@@ -576,10 +576,16 @@ async def _adapt_body(
                     # 前端自主选择消费其中一条通道（消费两条会重复渲染）。
                     # 持久化只写一份到 render_blocks，避免历史回放出现两倍内容。
                     if step_for_evt is not None and step_for_evt.step_id == "insight":
-                        for rb in _emit_insight_render(skill_name, result_raw, sub_step_id):
-                            agg.render_blocks.append(rb)              # 持久化一次
-                            yield format_sse("report", rb), agg       # 主通道
-                            yield format_sse("render", rb), agg       # debug 冗余
+                        parsed_for_check = _parse_stdout(result_raw)
+                        if isinstance(parsed_for_check, dict) and "results" in parsed_for_check:
+                            render_list = _emit_phase_render_blocks(parsed_for_check)
+                        else:
+                            render_list = _emit_insight_render(skill_name, result_raw, sub_step_id)
+                        for rb in render_list:
+                            agg.render_blocks.append(rb)
+                            yield format_sse("report", rb), agg
+                            yield format_sse("render", rb), agg
+
 
                 else:
                     # ── 加载类（get_skill_instructions / get_skill_reference）────
@@ -970,6 +976,41 @@ def _emit_insight_render(
 
     return []
 
+def _emit_phase_render_blocks(parsed: dict) -> list[dict]:
+    """处理 run_phase.py 的批量输出，每个有图的 step 产出一条 render block。"""
+    blocks = []
+    for result in parsed.get("results", []):
+        if not result.get("has_chart") or not result.get("chart_file"):
+            continue
+        try:
+            with open(result["chart_file"], "r", encoding="utf-8") as cf:
+                echarts = _json.load(cf)
+            os.unlink(result["chart_file"])
+        except Exception:
+            continue
+        if not echarts:
+            continue
+        description = result.get("description", "")
+        significance = result.get("significance", 0.0)
+        title = echarts.get("title", {}).get("text", "") if isinstance(echarts, dict) else ""
+        if not title:
+            title = str(result.get("insight_type", "洞察分析"))
+        conclusion = _build_insight_conclusion(description, significance)
+        chart_item = {
+            "chartId": f"p{result.get('phase_id')}s{result.get('step_id')}_{int(time.time() * 1000) % 1000000}",
+            "title": title,
+            "conclusion": conclusion,
+            "echartsOption": echarts,
+            "phaseId": result.get("phase_id"),
+            "stepId": result.get("step_id"),
+            "phaseName": result.get("phase_name", ""),
+            "stepName": result.get("step_name", ""),
+        }
+        blocks.append({
+            "renderType": "insight",
+            "renderData": {"charts": [chart_item], "markdownReport": ""},
+        })
+    return blocks
 
 def _build_insight_conclusion(description: Any, significance: float) -> str:
     """从 insight_query 结果生成图表结论文字。"""
