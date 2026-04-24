@@ -2,11 +2,10 @@
 description: >
   家宽网络调优助手：识别意图、规划方案、数据洞察、驱动执行的全链路 primary agent。
 mode: primary
-model: openrouter/qwen/qwen3.5-27b
 temperature: 0.6
 permission:
   task: allow
-  bash: allow
+  bash: deny
   skill: allow
   edit: deny
   read: allow
@@ -88,7 +87,7 @@ permission:
 3. 把校验结果连同方案呈现给用户，**停下等待确认**
 4. `passed=false` 时展示违规清单，让用户决策，不自动修正
 
-用户确认后进入 §4.6 方案执行。
+用户确认后先 §4.7 保存方案，再进入 §4.6 方案执行。
 
 ### 4.5 编辑方案（任务 D）
 
@@ -102,7 +101,7 @@ permission:
 
 ### 4.6 方案执行
 
-用户确认后，**按段落标题依次执行启用的段**：
+方案保存完成后，**按段落标题依次执行启用的段**：
 
 | 启用的段落 | 调用 Skill |
 |---|---|
@@ -114,7 +113,7 @@ permission:
 
 ### 4.7 保存方案
 
-用户确认保存后，加载 plan_store 的 SKILL.md，按说明调用保存脚本。
+用户确认方案后，**先保存再执行**。加载 plan_store 的 SKILL.md，按说明调用保存脚本。保存成功后进入 §4.6。
 
 ---
 
