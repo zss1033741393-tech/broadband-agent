@@ -80,9 +80,5 @@
     "home-broadband": {
       "model": "dashscope/qwen3.5-397b-a17b"
     }
-  },
-
-  "instructions": [
-    "prompts/orchestrator.md"
-  ]
+  }
 }
