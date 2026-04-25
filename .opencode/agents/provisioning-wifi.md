@@ -2,7 +2,7 @@
 description: >
   WIFI 仿真执行专家：驱动户型图识别→热力图→RSSI 采集→选点对比 4 步流水线。
 mode: subagent
-model: dashscope/qwen3.5-397b-a17b
+# model: dashscope/qwen3.5-397b-a17b
 temperature: 0.6
 permission:
   bash: allow
