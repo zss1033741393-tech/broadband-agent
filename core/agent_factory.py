@@ -26,6 +26,7 @@ from agno.team.team import TeamMode
 from loguru import logger
 
 from core.model_loader import create_model
+from core.skill_recovery import RobustSkills
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[1]
 _AGENTS_CONFIG_PATH = _PROJECT_ROOT / "configs" / "agents.yaml"
@@ -87,7 +88,7 @@ def _build_subset_skills(all_skills: Dict[str, Any], names: List[str]) -> Option
         def load(self):
             return self._items
 
-    return Skills(loaders=[_StaticLoader(selected)])
+    return RobustSkills(loaders=[_StaticLoader(selected)])
 
 
 def _append_skills_snippet(prompt: str, skills_obj: Optional[Skills]) -> str:
