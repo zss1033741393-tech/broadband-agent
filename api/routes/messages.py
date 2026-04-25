@@ -13,6 +13,7 @@ from loguru import logger
 
 from api import repository as repo
 from api.agent_bridge import get_session_context
+from api.engine_config import get_config
 from api.event_adapter import MessageAggregate, adapt
 from api.models import (
     ApiResponse,
@@ -51,41 +52,54 @@ async def send_message(conv_id: str, body: SendMessageRequest):
         f"send_message ← user_content_len={len(body.content)} preview={body.content[:80]!r}"
     )
 
-    # 取 SessionContext（含 team / tracer / observability DB session_id）
-    # tracer 在 SessionManager 创建时已向所有 model 注入 prompt 拦截器，
-    # 这里再把它沿事件流传给 adapt()，补齐 thinking/tool/member 等显式 trace。
-    ctx = get_session_context(conv_id)
+    engine_cfg = get_config()
 
-    # 在 observability 库（sessions.db）落 user 消息，拿到 user_msg_id 后续关联 tool_calls
-    user_msg_id = None
-    try:
-        ctx.tracer.request(body.content)
-        if ctx.db_session_id:
-            from core.observability.db import db as _obs_db
-            user_msg_id = _obs_db.insert_message(
-                ctx.db_session_id, "user", body.content
-            )
-    except Exception:
-        _api_log.exception("observability 入库 user 消息失败（不影响主流程）")
+    if engine_cfg["engine"] == "opencode":
+        # ── OpenCode 通道 ──
+        from api.opencode_adapter import adapt_opencode
+        from api.opencode_bridge import OpenCodeClient
 
-    # 启动 agno 流（用 ctx.team.arun，保持与 Gradio 路径一致；不再走 get_event_stream）
-    raw_stream = ctx.team.arun(
-        body.content,
-        session_id=conv_id,
-        stream=True,
-        stream_events=True,
-    )
-
-    # 包装成 SSE 生成器，完成后落库 assistant 消息
-    async def sse_generator() -> AsyncGenerator[str, None]:
-        agg: MessageAggregate | None = None
-        adapter = adapt(
+        oc = OpenCodeClient(base_url=engine_cfg["opencode_url"])
+        raw_stream = oc.send_and_stream(
             conv_id,
-            raw_stream,
+            body.content,
+            agent=engine_cfg.get("opencode_agent", "orchestrator"),
+        )
+        adapter_factory = lambda: adapt_opencode(conv_id, raw_stream)  # noqa: E731
+    else:
+        # ── agno 通道（现有逻辑不变）──
+        # 取 SessionContext（含 team / tracer / observability DB session_id）
+        ctx = get_session_context(conv_id)
+
+        # 在 observability 库（sessions.db）落 user 消息
+        user_msg_id = None
+        try:
+            ctx.tracer.request(body.content)
+            if ctx.db_session_id:
+                from core.observability.db import db as _obs_db
+
+                user_msg_id = _obs_db.insert_message(ctx.db_session_id, "user", body.content)
+        except Exception:
+            _api_log.exception("observability 入库 user 消息失败（不影响主流程）")
+
+        agno_raw_stream = ctx.team.arun(
+            body.content,
+            session_id=conv_id,
+            stream=True,
+            stream_events=True,
+        )
+        adapter_factory = lambda: adapt(  # noqa: E731
+            conv_id,
+            agno_raw_stream,
             tracer=ctx.tracer,
             db_session_id=ctx.db_session_id,
             user_msg_id=user_msg_id,
         )
+
+    # 包装成 SSE 生成器，完成后落库 assistant 消息
+    async def sse_generator() -> AsyncGenerator[str, None]:
+        agg: MessageAggregate | None = None
+        adapter = adapter_factory()
         started_at = time.monotonic()
         chunk_count = 0
         # logger.bind() 替代 logger.contextualize()：
@@ -101,6 +115,7 @@ async def send_message(conv_id: str, body: SendMessageRequest):
         except Exception as exc:
             _sse_log.exception("SSE 生成异常")
             from api.sse import format_sse
+
             yield format_sse("error", {"message": f"服务器内部错误：{exc}"})
 
         elapsed_ms = int((time.monotonic() - started_at) * 1000)
@@ -122,19 +137,23 @@ async def send_message(conv_id: str, body: SendMessageRequest):
                     if s.pending_text:
                         items.append({"type": "text", "content": s.pending_text})
                     if s.pending_thinking:
-                        items.append({
-                            "type": "thinking",
-                            "content": s.pending_thinking,
-                            "startedAt": 0,
-                            "endedAt": 0,
-                        })
-                    steps_data.append({
-                        "stepId": s.step_id,
-                        "title": s.title,
-                        "items": items,
-                        "subSteps": s.sub_steps,   # 保留，供旧前端降级 / 计数
-                        "textContent": s.text_content,
-                    })
+                        items.append(
+                            {
+                                "type": "thinking",
+                                "content": s.pending_thinking,
+                                "startedAt": 0,
+                                "endedAt": 0,
+                            }
+                        )
+                    steps_data.append(
+                        {
+                            "stepId": s.step_id,
+                            "title": s.title,
+                            "items": items,
+                            "subSteps": s.sub_steps,  # 保留，供旧前端降级 / 计数
+                            "textContent": s.text_content,
+                        }
+                    )
                 await repo.insert_assistant_message(
                     conv_id=conv_id,
                     content=agg.content,
