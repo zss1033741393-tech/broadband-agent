@@ -17,6 +17,15 @@ _log = logger.bind(channel="opencode")
 _session_map: dict[str, str] = {}
 
 
+def _client(**kwargs: Any) -> httpx.AsyncClient:
+    """创建跳过系统代理的 httpx 客户端。
+
+    企业环境中 HTTP_PROXY 环境变量会拦截 localhost 请求，
+    trust_env=False 让所有对 OpenCode Server 的请求直连，不走代理。
+    """
+    return httpx.AsyncClient(trust_env=False, **kwargs)
+
+
 class OpenCodeClient:
     """封装对 opencode serve 的 HTTP 调用。"""
 
@@ -30,7 +39,7 @@ class OpenCodeClient:
         /global/health 在部分 OpenCode 版本中不存在，故不用它。
         """
         try:
-            async with httpx.AsyncClient(timeout=5) as c:
+            async with _client(timeout=5) as c:
                 r = await c.get(f"{self.base_url}/session")
                 return r.status_code < 500
         except Exception:
@@ -42,7 +51,7 @@ class OpenCodeClient:
             return _session_map[conv_id]
 
         try:
-            async with httpx.AsyncClient(timeout=30) as c:
+            async with _client(timeout=30) as c:
                 r = await c.post(
                     f"{self.base_url}/session",
                     json={"title": f"broadband-{conv_id[:8]}"},
@@ -90,7 +99,7 @@ class OpenCodeClient:
         """
         sid = await self.ensure_session(conv_id)
 
-        async with httpx.AsyncClient(timeout=10) as c:
+        async with _client(timeout=10) as c:
             await c.post(
                 f"{self.base_url}/session/{sid}/prompt_async",
                 json={
@@ -100,7 +109,7 @@ class OpenCodeClient:
             )
         _log.info(f"消息已发送 conv_id={conv_id} sid={sid}")
 
-        async with httpx.AsyncClient(timeout=httpx.Timeout(300.0)) as c:
+        async with _client(timeout=httpx.Timeout(300.0)) as c:
             async with c.stream("GET", f"{self.base_url}/event") as resp:
                 async for line in resp.aiter_lines():
                     if line.startswith("event:"):
