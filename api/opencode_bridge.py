@@ -24,11 +24,15 @@ class OpenCodeClient:
         self.base_url = base_url.rstrip("/")
 
     async def health(self) -> bool:
-        """检查 OpenCode Server 是否在线。"""
+        """检查 OpenCode Server 是否在线。
+
+        用 GET /session 探活（返回任意非 5xx 状态码即视为在线）。
+        /global/health 在部分 OpenCode 版本中不存在，故不用它。
+        """
         try:
             async with httpx.AsyncClient(timeout=5) as c:
-                r = await c.get(f"{self.base_url}/global/health")
-                return r.status_code == 200
+                r = await c.get(f"{self.base_url}/session")
+                return r.status_code < 500
         except Exception:
             return False
 
@@ -84,11 +88,6 @@ class OpenCodeClient:
         Yields:
             OpenCode 原始事件 dict（type + properties）
         """
-        if not await self.health():
-            raise RuntimeError(
-                f"OpenCode Server 未就绪（{self.base_url}），请先执行：opencode serve --port 4096"
-            )
-
         sid = await self.ensure_session(conv_id)
 
         async with httpx.AsyncClient(timeout=10) as c:
