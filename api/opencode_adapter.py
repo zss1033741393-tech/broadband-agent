@@ -39,6 +39,12 @@ async def adapt_opencode(
     """消费 OpenCode 事件流，yield (SSE字符串, MessageAggregate) 元组。
 
     输出格式与 event_adapter.adapt() 完全一致，前端无感切换。
+
+    关键设计决策：
+    - orchestrator 不建 StepAggregate（与 agno leader 对齐，内容落顶层）
+    - session.idle 是唯一终止信号（message.updated(completed) 在多 agent 场景下多次触发）
+    - tinput 优先用 running 事件缓存，fallback 到 completed 事件的 state.input
+    - get_skill_script 默认视为 execute=True（OpenCode 侧 SKILL.md 始终带 execute=True）
     """
     agg = MessageAggregate(
         message_id=str(uuid.uuid4()),
@@ -62,6 +68,7 @@ async def adapt_opencode(
                 part = props.get("part", {})
                 delta = props.get("delta")
                 ptype = part.get("type", "")
+                msg_role = props.get("info", {}).get("role", "assistant")
 
                 # ── reasoning → thinking ──
                 if ptype == "reasoning":
@@ -70,7 +77,12 @@ async def adapt_opencode(
                     content = delta or part.get("text", "")
                     if content:
                         agg.thinking_content += content
-                        step_id = current_agent or ""
+                        # orchestrator thinking → 空 stepId（与 agno leader 对齐，落顶层）
+                        step_id = (
+                            current_agent
+                            if (current_agent and current_agent in steps_by_agent)
+                            else ""
+                        )
                         yield (
                             format_sse(
                                 "thinking",
@@ -82,30 +94,44 @@ async def adapt_opencode(
                             agg,
                         )
 
-                # ── text → text ──
+                # ── text → text（跳过用户消息 echo）──
                 elif ptype == "text":
+                    if msg_role == "user":
+                        # OpenCode 在用户发消息时会触发一条 user-role 的 text part，
+                        # 过滤掉，否则前端会把用户输入当 assistant 回复复读一遍。
+                        continue
                     content = delta or part.get("text", "")
                     if content:
                         agg.content += content
                         if current_agent and current_agent in steps_by_agent:
                             steps_by_agent[current_agent].text_content += content
-                        yield format_sse("text", {"delta": content}), agg
+                        # 向 member step 的文本区路由：若当前是已知 subagent 则带 stepId
+                        step_id = (
+                            current_agent
+                            if (current_agent and current_agent in steps_by_agent)
+                            else None
+                        )
+                        payload: dict[str, Any] = {"delta": content}
+                        if step_id:
+                            payload["stepId"] = step_id
+                        yield format_sse("text", payload), agg
 
-                # ── agent → step_start ──
+                # ── agent part：只为 _MEMBER_DISPLAY_NAMES 里的 subagent 建 step ──
+                # orchestrator 不建 step（与 agno leader 对齐，内容直接落顶层）
                 elif ptype == "agent":
                     agent_name = part.get("name", "")
-                    if agent_name and agent_name not in steps_by_agent:
-                        if thinking_start and not thinking_end:
-                            thinking_end = time.monotonic()
-
-                        current_agent = agent_name
+                    if not agent_name:
+                        continue
+                    if thinking_start and not thinking_end:
+                        thinking_end = time.monotonic()
+                    current_agent = agent_name
+                    if agent_name in _MEMBER_DISPLAY_NAMES and agent_name not in steps_by_agent:
                         step = StepAggregate(
                             step_id=agent_name,
-                            title=_MEMBER_DISPLAY_NAMES.get(agent_name, agent_name),
+                            title=_MEMBER_DISPLAY_NAMES[agent_name],
                         )
                         steps_by_agent[agent_name] = step
                         agg.steps.append(step)
-
                         yield (
                             format_sse(
                                 "step_start",
@@ -117,24 +143,28 @@ async def adapt_opencode(
                             agg,
                         )
 
-                # ── subtask → step_start（Task tool 委派）──
+                # ── subtask → step_start（Task tool 委派给 subagent）──
                 elif ptype == "subtask":
-                    agent_name = part.get("agent", "")
+                    # OpenCode subtask part 的 agent 字段可能有多种写法
+                    agent_name = (
+                        part.get("agent")
+                        or part.get("agentID")
+                        or part.get("name")
+                        or ""
+                    )
+                    _log.debug(f"subtask part fields={list(part.keys())} agent_name={agent_name!r}")
                     if agent_name and agent_name not in steps_by_agent:
                         current_agent = agent_name
-                        step = StepAggregate(
-                            step_id=agent_name,
-                            title=_MEMBER_DISPLAY_NAMES.get(agent_name, agent_name),
-                        )
+                        title = _MEMBER_DISPLAY_NAMES.get(agent_name, agent_name)
+                        step = StepAggregate(step_id=agent_name, title=title)
                         steps_by_agent[agent_name] = step
                         agg.steps.append(step)
-
                         yield (
                             format_sse(
                                 "step_start",
                                 {
                                     "stepId": agent_name,
-                                    "title": step.title,
+                                    "title": title,
                                 },
                             ),
                             agg,
@@ -147,6 +177,10 @@ async def adapt_opencode(
                     state = part.get("state", {})
                     status = state.get("status", "")
 
+                    _log.debug(
+                        f"tool part tool={tool_name!r} callID={call_id!r} status={status!r}"
+                    )
+
                     if status == "running":
                         tool_start_times[call_id] = time.monotonic()
                         tool_inputs[call_id] = state.get("input", {})
@@ -154,12 +188,18 @@ async def adapt_opencode(
                     elif status == "completed":
                         t0 = tool_start_times.pop(call_id, None)
                         duration_ms = int((time.monotonic() - t0) * 1000) if t0 else 0
-                        tinput = tool_inputs.pop(call_id, {})
+                        # 优先用 running 事件缓存的 input；
+                        # fallback 到 completed 事件里的 state.input（running 未到时的兜底）
+                        tinput = tool_inputs.pop(call_id, state.get("input", {}))
                         skill_name = _extract_skill_name(tinput)
                         stdout = state.get("output", "")
                         step_id = current_agent or ""
 
-                        is_exec = tool_name == "get_skill_script" and tinput.get("execute", False)
+                        # OpenCode 下 get_skill_script 始终是执行调用（SKILL.md 恒带 execute=True）；
+                        # execute 字段缺失时默认 True，避免 tinput 为空时误判为 False。
+                        is_exec = tool_name == "get_skill_script" and tinput.get(
+                            "execute", True
+                        )
                         is_load = tool_name in (
                             "get_skill_instructions",
                             "get_skill_reference",
@@ -191,7 +231,7 @@ async def adapt_opencode(
                             for sse_chunk, updated_agg in _emit_renders(
                                 skill_name,
                                 stdout,
-                                sub_step_id,
+                                sub_step_id if (is_exec or is_load) else f"{step_id}_{call_id}",
                                 step_id,
                                 agg,
                             ):
@@ -199,11 +239,11 @@ async def adapt_opencode(
 
                     elif status == "error":
                         error_msg = state.get("error", "工具执行失败")
-                        _log.error(f"tool error: {tool_name} {error_msg}")
+                        _log.error(f"tool error: {tool_name} call_id={call_id} error={error_msg}")
 
                 # ── step-finish → step_end ──
                 elif ptype == "step-finish":
-                    if current_agent:
+                    if current_agent and current_agent in steps_by_agent:
                         yield (
                             format_sse(
                                 "step_end",
@@ -246,7 +286,7 @@ async def adapt_opencode(
                 yield format_sse("error", {"message": msg}), agg
                 return
 
-            # ── session.idle — 该 session 完成 ──
+            # ── session.idle — 该 session 完成（唯一的终止信号）──
             elif etype == "session.idle":
                 if agg.status == "streaming":
                     if thinking_start:
