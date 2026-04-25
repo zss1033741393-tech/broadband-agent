@@ -9,7 +9,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-_CONFIG_PATH = Path(__file__).resolve().parents[1] / "data" / "engine.json"
+_CONFIG_PATH = Path(__file__).resolve().parents[1] / "configs" / "engine.json"
 _DEFAULT: dict[str, Any] = {
     "engine": "agno",
     "opencode_url": "http://127.0.0.1:4096",
@@ -28,6 +28,5 @@ def set_config(patch: dict[str, Any]) -> dict[str, Any]:
     """合并更新引擎配置并持久化。"""
     cfg = get_config()
     cfg.update(patch)
-    _CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
     _CONFIG_PATH.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
     return cfg
