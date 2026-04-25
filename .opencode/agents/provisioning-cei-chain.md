@@ -3,7 +3,7 @@ description: >
   体验保障链执行专家：CEI 权重配置 → CEI 评分回采 → 故障诊断 → 远程闭环
   的顺序串行 workflow，每步基于上一步上下文自适应推导参数。
 mode: subagent
-model: dashscope/qwen3.5-397b-a17b
+# model: dashscope/qwen3.5-397b-a17b
 temperature: 0.6
 permission:
   bash: allow
