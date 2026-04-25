@@ -220,36 +220,22 @@ async def adapt_opencode(
                     agg.reasoning_tokens += tokens.get("reasoning", 0)
                     agg.total_tokens = agg.input_tokens + agg.output_tokens
 
-            # ── message.updated — 消息级状态更新 ──
+            # ── message.updated — 消息级状态更新（只累计 token，不终止流）──
+            # 注意：multi-agent 场景下，每个 SubAgent 完成后都会触发 message.updated(completed)，
+            # 不能在此终止——必须等 session.idle 才能确认整个 session 已完成。
             elif etype == "message.updated":
                 info = props.get("info", {})
                 if info.get("role") == "assistant":
                     tokens = info.get("tokens", {})
-                    agg.input_tokens = tokens.get("input", 0)
-                    agg.output_tokens = tokens.get("output", 0)
-                    agg.reasoning_tokens = tokens.get("reasoning", 0)
+                    # 累加（不覆盖），各 SubAgent 的 token 合计到同一个 agg
+                    agg.input_tokens += tokens.get("input", 0)
+                    agg.output_tokens += tokens.get("output", 0)
+                    agg.reasoning_tokens += tokens.get("reasoning", 0)
                     agg.total_tokens = agg.input_tokens + agg.output_tokens
 
-                    if info.get("time", {}).get("completed"):
-                        if thinking_start:
-                            thinking_end = thinking_end or time.monotonic()
-                            agg.thinking_duration_sec = int(thinking_end - thinking_start)
-                        agg.status = "done"
-                        yield (
-                            format_sse(
-                                "done",
-                                {
-                                    "messageId": agg.message_id,
-                                    "thinkingDurationSec": agg.thinking_duration_sec,
-                                    "inputTokens": agg.input_tokens,
-                                    "outputTokens": agg.output_tokens,
-                                    "totalTokens": agg.total_tokens,
-                                    "reasoningTokens": agg.reasoning_tokens,
-                                },
-                            ),
-                            agg,
-                        )
-                        return
+                    if info.get("time", {}).get("completed") and thinking_start:
+                        thinking_end = thinking_end or time.monotonic()
+                        agg.thinking_duration_sec = int(thinking_end - thinking_start)
 
             # ── session.error ──
             elif etype == "session.error":

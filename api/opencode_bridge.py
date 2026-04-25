@@ -89,28 +89,33 @@ class OpenCodeClient:
         """发送消息并消费 SSE 事件流。
 
         流程：
-        1. 预检 OpenCode Server 是否在线
-        2. POST /session/:id/prompt_async 异步发送
-        3. GET /event 监听全局 SSE，过滤该 session 的事件
-        4. 直到收到 session.idle（该 session 的消息处理完毕）
+        1. 先建立 GET /event SSE 长连接（避免错过 prompt_async 后立即产生的事件）
+        2. POST /session/:id/prompt_async 异步触发 LLM 处理
+        3. 过滤并 yield 该 session 的事件
+        4. 直到收到 session.idle（整个 session 空闲，所有 Agent 均已完成）
 
         Yields:
             OpenCode 原始事件 dict（type + properties）
         """
         sid = await self.ensure_session(conv_id)
 
-        async with _client(timeout=10) as c:
-            await c.post(
-                f"{self.base_url}/session/{sid}/prompt_async",
-                json={
-                    "agent": agent,
-                    "parts": [{"type": "text", "text": message}],
-                },
-            )
-        _log.info(f"消息已发送 conv_id={conv_id} sid={sid}")
-
-        async with _client(timeout=httpx.Timeout(300.0)) as c:
+        # 先建立事件流连接，再发送 prompt，避免丢失 prompt_async 后立即产生的早期事件
+        async with _client(
+            timeout=httpx.Timeout(connect=10.0, read=300.0, write=30.0, pool=10.0)
+        ) as c:
             async with c.stream("GET", f"{self.base_url}/event") as resp:
+                # SSE 连接就绪后再触发 prompt
+                async with _client(timeout=30) as pc:
+                    r = await pc.post(
+                        f"{self.base_url}/session/{sid}/prompt_async",
+                        json={
+                            "agent": agent,
+                            "parts": [{"type": "text", "text": message}],
+                        },
+                    )
+                    r.raise_for_status()
+                _log.info(f"消息已发送 conv_id={conv_id} sid={sid}")
+
                 async for line in resp.aiter_lines():
                     if line.startswith("event:"):
                         continue
@@ -133,6 +138,11 @@ class OpenCodeClient:
                     if event_session and event_session != sid:
                         continue
 
+                    _log.debug(
+                        f"event type={event.get('type')} "
+                        f"ptype={props.get('part', {}).get('type', '') if 'part' in props else ''} "
+                        f"sid={event_session}"
+                    )
                     yield event
 
                     if event.get("type") == "session.idle":
