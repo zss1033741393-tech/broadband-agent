@@ -129,22 +129,37 @@ class OpenCodeClient:
 
                     event = raw.get("payload", raw)
                     props = event.get("properties", {})
+                    etype = event.get("type", "")
+                    part = props.get("part", {}) or {}
+                    ptype = part.get("type", "")
 
+                    # ── session filter ───────────────────────────────────────
+                    # EventMessagePartUpdated 的 properties 只有 {part, delta}，
+                    # 没有顶层 sessionID 和 info.sessionID。part.sessionID 是该 Part
+                    # 所属消息的 session ID——对于 sub-agent（Task tool 派生的子
+                    # Agent），part.sessionID 是 sub-session ID，不等于主 sid，
+                    # 所以 **不能** 用 part.sessionID 做过滤，否则会丢弃所有子 Agent 事件。
+                    # 只用 props.sessionID（session.idle 等会话级事件携带）和
+                    # props.info.sessionID（message.updated 携带）做过滤。
                     event_session = (
                         props.get("sessionID")
                         or props.get("info", {}).get("sessionID")
-                        or (props.get("part", {}) or {}).get("sessionID")
                     )
                     if event_session and event_session != sid:
+                        _log.debug(
+                            f"filtered: type={etype!r} ptype={ptype!r} "
+                            f"event_session={event_session!r} sid={sid!r}"
+                        )
                         continue
 
-                    _log.debug(
-                        f"event type={event.get('type')} "
-                        f"ptype={props.get('part', {}).get('type', '') if 'part' in props else ''} "
-                        f"sid={event_session}"
+                    _log.info(
+                        f"event type={etype!r} ptype={ptype!r} "
+                        f"tool={part.get('tool', '')!r} "
+                        f"part_sid={part.get('sessionID', '')!r} "
+                        f"top_sid={event_session!r}"
                     )
                     yield event
 
-                    if event.get("type") == "session.idle":
+                    if etype == "session.idle":
                         if props.get("sessionID") == sid:
                             return

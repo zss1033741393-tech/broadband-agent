@@ -57,6 +57,9 @@ async def adapt_opencode(
     tool_inputs: dict[str, dict[str, Any]] = {}
     thinking_start: Optional[float] = None
     thinking_end: Optional[float] = None
+    # 跟踪 user 消息 ID（从 message.updated(role=user) 提取）
+    # 用于过滤 message.part.updated 中用户消息的 TextPart echo
+    user_message_ids: set[str] = set()
 
     try:
         async for event in event_stream:
@@ -68,7 +71,6 @@ async def adapt_opencode(
                 part = props.get("part", {})
                 delta = props.get("delta")
                 ptype = part.get("type", "")
-                msg_role = props.get("info", {}).get("role", "assistant")
 
                 # ── reasoning → thinking ──
                 if ptype == "reasoning":
@@ -96,9 +98,13 @@ async def adapt_opencode(
 
                 # ── text → text（跳过用户消息 echo）──
                 elif ptype == "text":
-                    if msg_role == "user":
-                        # OpenCode 在用户发消息时会触发一条 user-role 的 text part，
-                        # 过滤掉，否则前端会把用户输入当 assistant 回复复读一遍。
+                    # EventMessagePartUpdated.properties 只有 {part, delta}，
+                    # 没有 info.role，所以不能通过 role 过滤。
+                    # 正确做法：用 part.messageID 比对已知 user 消息 ID 集合。
+                    if part.get("messageID") in user_message_ids:
+                        _log.debug(
+                            f"skip user echo msgID={part.get('messageID')!r}"
+                        )
                         continue
                     content = delta or part.get("text", "")
                     if content:
@@ -152,7 +158,10 @@ async def adapt_opencode(
                         or part.get("name")
                         or ""
                     )
-                    _log.debug(f"subtask part fields={list(part.keys())} agent_name={agent_name!r}")
+                    _log.info(
+                        f"subtask part keys={list(part.keys())} "
+                        f"agent={agent_name!r} sid={part.get('sessionID')!r}"
+                    )
                     if agent_name and agent_name not in steps_by_agent:
                         current_agent = agent_name
                         title = _MEMBER_DISPLAY_NAMES.get(agent_name, agent_name)
@@ -265,9 +274,17 @@ async def adapt_opencode(
             # 不能在此终止——必须等 session.idle 才能确认整个 session 已完成。
             elif etype == "message.updated":
                 info = props.get("info", {})
-                if info.get("role") == "assistant":
+                msg_role = info.get("role", "")
+                msg_id = info.get("id", "")
+
+                if msg_role == "user" and msg_id:
+                    # 记录 user 消息 ID，供 TextPart echo 过滤使用
+                    user_message_ids.add(msg_id)
+                    _log.info(f"tracked user message id={msg_id!r}")
+
+                elif msg_role == "assistant":
                     tokens = info.get("tokens", {})
-                    # 累加（不覆盖），各 SubAgent 的 token 合计到同一个 agg
+                    # 各 assistant 消息（orchestrator + sub-agent）的 token 累加
                     agg.input_tokens += tokens.get("input", 0)
                     agg.output_tokens += tokens.get("output", 0)
                     agg.reasoning_tokens += tokens.get("reasoning", 0)
