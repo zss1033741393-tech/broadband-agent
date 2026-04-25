@@ -41,6 +41,49 @@ if TYPE_CHECKING:
 # 事件适配层拷贝 skill 产物到这里，images 路由按 imageId 直接 FileResponse
 _IMAGES_DIR = Path(__file__).resolve().parents[1] / "data" / "images"
 
+# 项目根目录（api/event_adapter.py 的上两级）
+_PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+
+def _resolve_skill_path(raw: str) -> Optional[Path]:
+    """解析技能脚本产物路径，兼容 Windows 绝对路径在 Linux 上运行的场景。
+
+    策略（按优先级）：
+    1. 路径原样尝试（Windows 本机 FastAPI 或 Linux 本机路径）
+    2. Windows 驱动器路径 → /mnt/<drive>/... 转换（WSL 场景）
+    3. 提取 skills/ 锚点，相对于项目根目录解析（跨 OS clone 同一仓库的场景）
+    """
+    if not raw:
+        return None
+
+    # 1. 原样
+    p = Path(raw)
+    if p.exists():
+        return p
+
+    # 统一用正斜杠处理
+    normalized = raw.replace("\\", "/")
+
+    # 2. Windows 盘符 → WSL /mnt/<drive>/...
+    import re as _re
+    m = _re.match(r"^([A-Za-z]):/(.*)", normalized)
+    if m:
+        drive = m.group(1).lower()
+        rest = m.group(2)
+        wsl_p = Path(f"/mnt/{drive}/{rest}")
+        if wsl_p.exists():
+            return wsl_p
+
+    # 3. skills/ 锚点相对于项目根目录
+    idx = normalized.find("skills/")
+    if idx >= 0:
+        rel = normalized[idx:]
+        candidate = _PROJECT_ROOT / rel
+        if candidate.exists():
+            return candidate
+
+    return None
+
 
 # ─── 聚合对象 ─────────────────────────────────────────────────────────────────
 
@@ -1126,8 +1169,8 @@ def _collect_wifi_images(msg_id: str, items: Any, api_log: Any) -> list[dict]:
         if not src:
             continue
 
-        src_path = Path(src)
-        if not src_path.exists():
+        src_path = _resolve_skill_path(src)
+        if src_path is None:
             api_log.warning(f"wifi image 源文件不存在: {src}")
             continue
 
@@ -1169,8 +1212,8 @@ def _collect_wifi_data_files(msg_id: str, items: Any, api_log: Any) -> list[dict
         if not src:
             continue
 
-        src_path = Path(src)
-        if not src_path.exists():
+        src_path = _resolve_skill_path(src)
+        if src_path is None:
             api_log.warning(f"wifi data 源文件不存在: {src}")
             continue
 

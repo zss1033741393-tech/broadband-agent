@@ -141,6 +141,17 @@ class OpenCodeClient:
                     # 所以 **不能** 用 part.sessionID 做过滤，否则会丢弃所有子 Agent 事件。
                     # 只用 props.sessionID（session.idle 等会话级事件携带）和
                     # props.info.sessionID（message.updated 携带）做过滤。
+                    #
+                    # 特例：message.updated(role=user) 来自子会话时也需放行，
+                    # 适配层用它追踪子 agent 的 user 消息 ID，才能过滤 echo。
+                    if etype == "message.updated" and props.get("info", {}).get("role") == "user":
+                        _log.debug(
+                            f"passthrough user msg.updated from sub-session "
+                            f"id={props.get('info', {}).get('id', '')!r}"
+                        )
+                        yield event
+                        continue
+
                     event_session = (
                         props.get("sessionID")
                         or props.get("info", {}).get("sessionID")

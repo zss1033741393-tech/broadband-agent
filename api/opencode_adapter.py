@@ -55,9 +55,11 @@ async def adapt_opencode(
     current_agent: Optional[str] = None
     tool_start_times: dict[str, float] = {}
     tool_inputs: dict[str, dict[str, Any]] = {}
+    # task tool call_id → subagent_type；用于 task.running 时建 step、task.completed 时结束 step
+    task_agent_map: dict[str, str] = {}
     thinking_start: Optional[float] = None
     thinking_end: Optional[float] = None
-    # 跟踪 user 消息 ID（从 message.updated(role=user) 提取）
+    # 跟踪 user 消息 ID（从 message.updated(role=user) 提取，含子会话）
     # 用于过滤 message.part.updated 中用户消息的 TextPart echo
     user_message_ids: set[str] = set()
 
@@ -190,6 +192,53 @@ async def adapt_opencode(
                         f"tool part tool={tool_name!r} callID={call_id!r} status={status!r}"
                     )
 
+                    # ── task tool → sub-agent step 生命周期 ──
+                    # orchestrator 通过 task tool 把工作委派给 sub-agent；
+                    # running 时建 step，completed 时结束 step，
+                    # 中间所有子会话事件（reasoning/text/tool）归属于该 step。
+                    if tool_name == "task":
+                        if status == "running":
+                            subagent_type = state.get("input", {}).get("subagent_type", "")
+                            if (
+                                subagent_type
+                                and subagent_type in _MEMBER_DISPLAY_NAMES
+                                and subagent_type not in steps_by_agent
+                            ):
+                                current_agent = subagent_type
+                                task_agent_map[call_id] = subagent_type
+                                step = StepAggregate(
+                                    step_id=subagent_type,
+                                    title=_MEMBER_DISPLAY_NAMES[subagent_type],
+                                )
+                                steps_by_agent[subagent_type] = step
+                                agg.steps.append(step)
+                                _log.info(
+                                    f"task tool running → step_start stepId={subagent_type!r}"
+                                )
+                                yield (
+                                    format_sse(
+                                        "step_start",
+                                        {
+                                            "stepId": subagent_type,
+                                            "title": step.title,
+                                        },
+                                    ),
+                                    agg,
+                                )
+                        elif status == "completed":
+                            task_agent = task_agent_map.pop(call_id, None)
+                            if task_agent and task_agent in steps_by_agent:
+                                _log.info(
+                                    f"task tool completed → step_end stepId={task_agent!r}"
+                                )
+                                yield (
+                                    format_sse("step_end", {"stepId": task_agent}),
+                                    agg,
+                                )
+                            if current_agent == task_agent:
+                                current_agent = None
+                        continue
+
                     if status == "running":
                         tool_start_times[call_id] = time.monotonic()
                         tool_inputs[call_id] = state.get("input", {})
@@ -251,8 +300,10 @@ async def adapt_opencode(
                         _log.error(f"tool error: {tool_name} call_id={call_id} error={error_msg}")
 
                 # ── step-finish → step_end ──
+                # task 运行期间（task_agent_map 非空）step_end 由 task.completed 触发；
+                # sub-agent 的多个 step-finish 不重复发 step_end。
                 elif ptype == "step-finish":
-                    if current_agent and current_agent in steps_by_agent:
+                    if not task_agent_map and current_agent and current_agent in steps_by_agent:
                         yield (
                             format_sse(
                                 "step_end",
