@@ -1127,9 +1127,17 @@ def _emit_wifi_simulation_render(msg_id: str, result_raw: Any) -> list[dict]:
     images = _collect_wifi_images(msg_id, parsed.get("image_paths") or [], api_log)
     data_files = _collect_wifi_data_files(msg_id, parsed.get("data_paths") or [], api_log)
 
-    # 无任何图也无数据：不发事件（skill 可能是 error 路径）
-    if not images and not data_files:
+    # 优先检查 stats 字段：即使图片因跨 OS 文件系统隔离无法拷贝（OpenCode 在 Windows
+    # 生成，FastAPI 在 Linux/WSL 侧无法访问），stats 是内联在 stdout JSON 中的数值数据，
+    # 始终可用。有 stats 就发 wifi_result，前端可渲染指标面板（即使 images 为空）。
+    if not images and not data_files and not parsed.get("stats"):
         return []
+
+    if not images:
+        api_log.warning(
+            "wifi_simulation images 为空（可能因 OpenCode 运行于 Windows 而 FastAPI 运行于 Linux，"
+            "跨 OS 文件系统不可访问）；仍发 wifi_result，携带 stats/summary 供前端渲染指标"
+        )
 
     render_data: dict[str, Any] = {
         "preset": parsed.get("preset") or "",

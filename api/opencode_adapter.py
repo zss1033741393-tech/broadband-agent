@@ -53,9 +53,12 @@ async def adapt_opencode(
 
     steps_by_agent: dict[str, StepAggregate] = {}
     current_agent: Optional[str] = None
+    # 主会话 ID：从第一条 message.part.updated 的 part.sessionID 推断，
+    # 用于区分 orchestrator 事件（同主会话）和 sub-agent 事件（子会话）。
+    main_session_id: Optional[str] = None
     tool_start_times: dict[str, float] = {}
     tool_inputs: dict[str, dict[str, Any]] = {}
-    # task tool call_id → subagent_type；用于 task.running 时建 step、task.completed 时结束 step
+    # task tool call_id → subagent_type；task.running 时注册、task.completed 时弹出
     task_agent_map: dict[str, str] = {}
     thinking_start: Optional[float] = None
     thinking_end: Optional[float] = None
@@ -73,6 +76,59 @@ async def adapt_opencode(
                 part = props.get("part", {})
                 delta = props.get("delta")
                 ptype = part.get("type", "")
+                part_session = part.get("sessionID", "")
+
+                # ── session-aware routing ─────────────────────────────────
+                # part.sessionID 区分来源：
+                #   orchestrator 事件 → part.sessionID == main_session_id → 顶层渲染
+                #   sub-agent 事件   → part.sessionID != main_session_id → sub-agent step 渲染
+                #
+                # 不能依赖 task.running 设置 current_agent，因为 task.running 在
+                # orchestrator reasoning 流式结束前就触发（并发）。
+                # 改为：task.running 仅注册 task_agent_map；
+                # sub-agent 首条事件到达（part_session != main_session_id）时延迟建 step。
+                if main_session_id is None and part_session:
+                    main_session_id = part_session
+
+                if part_session and main_session_id:
+                    if part_session == main_session_id:
+                        # Orchestrator 事件：无论 current_agent 是什么，均顶层渲染
+                        routing_agent: Optional[str] = None
+                    else:
+                        # Sub-agent 事件：找当前活跃的 task agent
+                        routing_agent = (
+                            next(iter(task_agent_map.values()), None)
+                            if task_agent_map
+                            else None
+                        )
+                        # 首条子会话事件到达时，建立 step 并 emit step_start
+                        if (
+                            routing_agent
+                            and routing_agent in _MEMBER_DISPLAY_NAMES
+                            and routing_agent not in steps_by_agent
+                        ):
+                            current_agent = routing_agent
+                            _step = StepAggregate(
+                                step_id=routing_agent,
+                                title=_MEMBER_DISPLAY_NAMES[routing_agent],
+                            )
+                            steps_by_agent[routing_agent] = _step
+                            agg.steps.append(_step)
+                            yield (
+                                format_sse(
+                                    "step_start",
+                                    {
+                                        "stepId": routing_agent,
+                                        "title": _step.title,
+                                    },
+                                ),
+                                agg,
+                            )
+                        elif routing_agent in steps_by_agent if routing_agent else False:
+                            current_agent = routing_agent
+                else:
+                    # 无会话信息（session.idle 等），回退到 current_agent
+                    routing_agent = current_agent
 
                 # ── reasoning → thinking ──
                 if ptype == "reasoning":
@@ -81,10 +137,10 @@ async def adapt_opencode(
                     content = delta or part.get("text", "")
                     if content:
                         agg.thinking_content += content
-                        # orchestrator thinking → 空 stepId（与 agno leader 对齐，落顶层）
+                        # 用 routing_agent 路由：orchestrator → ""（顶层），sub-agent → stepId
                         step_id = (
-                            current_agent
-                            if (current_agent and current_agent in steps_by_agent)
+                            routing_agent
+                            if (routing_agent and routing_agent in steps_by_agent)
                             else ""
                         )
                         yield (
@@ -111,12 +167,12 @@ async def adapt_opencode(
                     content = delta or part.get("text", "")
                     if content:
                         agg.content += content
-                        if current_agent and current_agent in steps_by_agent:
-                            steps_by_agent[current_agent].text_content += content
-                        # 向 member step 的文本区路由：若当前是已知 subagent 则带 stepId
+                        if routing_agent and routing_agent in steps_by_agent:
+                            steps_by_agent[routing_agent].text_content += content
+                        # 用 routing_agent 路由：sub-agent 带 stepId，orchestrator 不带
                         step_id = (
-                            current_agent
-                            if (current_agent and current_agent in steps_by_agent)
+                            routing_agent
+                            if (routing_agent and routing_agent in steps_by_agent)
                             else None
                         )
                         payload: dict[str, Any] = {"delta": content}
@@ -193,37 +249,19 @@ async def adapt_opencode(
                     )
 
                     # ── task tool → sub-agent step 生命周期 ──
-                    # orchestrator 通过 task tool 把工作委派给 sub-agent；
-                    # running 时建 step，completed 时结束 step，
-                    # 中间所有子会话事件（reasoning/text/tool）归属于该 step。
+                    # orchestrator 通过 task tool 把工作委派给 sub-agent。
+                    # running 时只注册 task_agent_map（不提前建 step，因为 task.running
+                    # 会在 orchestrator 的 reasoning 流结束前触发，提前设置会导致
+                    # orchestrator 内容错误落入 sub-agent step）。
+                    # step_start 由第一条子会话事件（part.sessionID != main_session_id）延迟触发。
+                    # task.completed 时发 step_end 并清理状态。
                     if tool_name == "task":
                         if status == "running":
                             subagent_type = state.get("input", {}).get("subagent_type", "")
-                            if (
-                                subagent_type
-                                and subagent_type in _MEMBER_DISPLAY_NAMES
-                                and subagent_type not in steps_by_agent
-                            ):
-                                current_agent = subagent_type
+                            if subagent_type and subagent_type in _MEMBER_DISPLAY_NAMES:
                                 task_agent_map[call_id] = subagent_type
-                                step = StepAggregate(
-                                    step_id=subagent_type,
-                                    title=_MEMBER_DISPLAY_NAMES[subagent_type],
-                                )
-                                steps_by_agent[subagent_type] = step
-                                agg.steps.append(step)
                                 _log.info(
-                                    f"task tool running → step_start stepId={subagent_type!r}"
-                                )
-                                yield (
-                                    format_sse(
-                                        "step_start",
-                                        {
-                                            "stepId": subagent_type,
-                                            "title": step.title,
-                                        },
-                                    ),
-                                    agg,
+                                    f"task tool running → registered stepId={subagent_type!r}"
                                 )
                         elif status == "completed":
                             task_agent = task_agent_map.pop(call_id, None)
@@ -251,7 +289,8 @@ async def adapt_opencode(
                         tinput = tool_inputs.pop(call_id, state.get("input", {}))
                         skill_name = _extract_skill_name(tinput)
                         stdout = state.get("output", "")
-                        step_id = current_agent or ""
+                        # 用 routing_agent 路由：sub-agent 的工具调用落入其 step
+                        step_id = routing_agent or ""
 
                         # OpenCode 下 get_skill_script 始终是执行调用（SKILL.md 恒带 execute=True）；
                         # execute 字段缺失时默认 True，避免 tinput 为空时误判为 False。
@@ -276,9 +315,9 @@ async def adapt_opencode(
                                 "stderr": "",
                             }
 
-                            if current_agent and current_agent in steps_by_agent:
-                                steps_by_agent[current_agent].sub_steps.append(sub)
-                                steps_by_agent[current_agent].items.append(
+                            if routing_agent and routing_agent in steps_by_agent:
+                                steps_by_agent[routing_agent].sub_steps.append(sub)
+                                steps_by_agent[routing_agent].items.append(
                                     {"type": "sub_step", "data": sub}
                                 )
 
@@ -303,12 +342,12 @@ async def adapt_opencode(
                 # task 运行期间（task_agent_map 非空）step_end 由 task.completed 触发；
                 # sub-agent 的多个 step-finish 不重复发 step_end。
                 elif ptype == "step-finish":
-                    if not task_agent_map and current_agent and current_agent in steps_by_agent:
+                    if not task_agent_map and routing_agent and routing_agent in steps_by_agent:
                         yield (
                             format_sse(
                                 "step_end",
                                 {
-                                    "stepId": current_agent,
+                                    "stepId": routing_agent,
                                 },
                             ),
                             agg,
