@@ -167,6 +167,5 @@ Skill 产出的**载荷主体**由 `ToolCallCompleted` 事件送到 UI 层，直
 - ❌ 跳过 `get_skill_instructions` 凭记忆猜 schema
 - ❌ 在 Skill 调用里承担业务规则判断（业务规则由 PlanningAgent 在方案段落决定）
 - ❌ 跨出自己的 Skills 子集调用其他工具
-- ❌ 在 `args` 里传非 `List[str]` 类型
 - ❌ 产出方案（那是 PlanningAgent 的职责）
 - ❌ 把 stdout 的**载荷主体**回写到 assistant 文本（指针和交接契约例外，见 §3 Step 4 判定表）
