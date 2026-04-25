@@ -37,17 +37,35 @@ class OpenCodeClient:
         if conv_id in _session_map:
             return _session_map[conv_id]
 
-        async with httpx.AsyncClient(timeout=10) as c:
-            r = await c.post(
-                f"{self.base_url}/session",
-                json={"title": f"broadband-{conv_id[:8]}"},
-            )
-            r.raise_for_status()
-            session = r.json()
-            sid = session["id"]
-            _session_map[conv_id] = sid
-            _log.info(f"OpenCode session 创建: conv_id={conv_id} → sid={sid}")
-            return sid
+        try:
+            async with httpx.AsyncClient(timeout=30) as c:
+                r = await c.post(
+                    f"{self.base_url}/session",
+                    json={"title": f"broadband-{conv_id[:8]}"},
+                )
+                r.raise_for_status()
+        except httpx.HTTPStatusError as e:
+            body = ""
+            try:
+                body = e.response.text[:300]
+            except Exception:
+                pass
+            raise RuntimeError(
+                f"OpenCode Server 返回 {e.response.status_code}，session 创建失败"
+                + (f"（{body}）" if body else "")
+                + "。请检查：① opencode serve 是否在项目根目录启动；"
+                "② opencode.json 中 LLM provider 配置是否正确"
+            ) from e
+        except (httpx.ConnectError, httpx.TimeoutException) as e:
+            raise RuntimeError(
+                f"无法连接到 OpenCode Server（{self.base_url}），请先执行：opencode serve --port 4096"
+            ) from e
+
+        session = r.json()
+        sid = session["id"]
+        _session_map[conv_id] = sid
+        _log.info(f"OpenCode session 创建: conv_id={conv_id} → sid={sid}")
+        return sid
 
     async def send_and_stream(
         self,
@@ -58,13 +76,19 @@ class OpenCodeClient:
         """发送消息并消费 SSE 事件流。
 
         流程：
-        1. POST /session/:id/prompt_async 异步发送
-        2. GET /event 监听全局 SSE，过滤该 session 的事件
-        3. 直到收到 session.idle（该 session 的消息处理完毕）
+        1. 预检 OpenCode Server 是否在线
+        2. POST /session/:id/prompt_async 异步发送
+        3. GET /event 监听全局 SSE，过滤该 session 的事件
+        4. 直到收到 session.idle（该 session 的消息处理完毕）
 
         Yields:
             OpenCode 原始事件 dict（type + properties）
         """
+        if not await self.health():
+            raise RuntimeError(
+                f"OpenCode Server 未就绪（{self.base_url}），请先执行：opencode serve --port 4096"
+            )
+
         sid = await self.ensure_session(conv_id)
 
         async with httpx.AsyncClient(timeout=10) as c:
