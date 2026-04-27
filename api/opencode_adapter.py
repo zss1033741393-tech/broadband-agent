@@ -146,11 +146,37 @@ async def adapt_opencode(
                             if task_agent_map
                             else None
                         )
-                        # Bug2 fix: 只在首条子会话事件时建 step（task_agent_map 机制，唯一）
+                        # step_start 触发时机修复（Bug2 + 顺序修复）：
+                        #
+                        # OpenCode 中 task.running 事件（sub-agent 启动信号）先于
+                        # orchestrator reasoning tokens 到达 SSE 流——qwen3.5 等推理模型
+                        # 先内部完成思考、决策 task 调用，再批量输出 reasoning tokens。
+                        # 若在「任意子会话事件」（包括 tool running）触发 step_start，
+                        # step 卡片将出现在 orchestrator thinking 之前，顺序错乱。
+                        #
+                        # 修复：只在「首条可见内容事件」触发 step_start：
+                        #   - ptype == "reasoning"/"text"：sub-agent 自身内容
+                        #   - ptype == "tool" + status == "completed"：脚本执行完毕，
+                        #     紧接着要发 sub_step，step_start 必须先于 sub_step
+                        # 不可见的 tool running / step-finish 不触发，保证
+                        # orchestrator thinking/text 先于 step_start 到达前端。
+                        _tool_status = (
+                            part.get("state", {}).get("status", "")
+                            if ptype == "tool" else ""
+                        )
+                        _is_visible = (
+                            ptype in ("reasoning", "text")
+                            or (
+                                ptype == "tool"
+                                and _tool_status == "completed"
+                                and part.get("tool", "") != "task"
+                            )
+                        )
                         if (
                             routing_agent
                             and routing_agent in _MEMBER_DISPLAY_NAMES
                             and routing_agent not in steps_by_agent
+                            and _is_visible
                         ):
                             current_agent = routing_agent
                             _step = StepAggregate(
