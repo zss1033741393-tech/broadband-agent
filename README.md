@@ -10,19 +10,18 @@ Hummingbird 的 free-code 插件：家宽网络调优多 Agent 系统。
 | 路径 | 用途 |
 |---|---|
 | `plugin.json` | free-code 插件清单（声明 `name: "fae"`，仅暴露 agents） |
-| `agents/` | 6 个 Agent 定义（Orchestrator + 5 SubAgents） |
+| `agents/` | 6 个 Agent 定义（自包含，frontmatter + system prompt 全在 .md 中） |
 | `hooks/` | session_start hook：自动 `uv sync` 准备 Python 环境 |
-| `prompts/` | Agent system prompt 源文件（被 agents/ 通过 Read 加载） |
 | `skills/` | 16 个 Python Skill 实现（Agent 通过 Bash 调用） |
-| `configs/agents.yaml` | 原 agno Team 结构参考 |
 | `vendor/` | 本地 editable Python 包（`ce_insight_core` / `fae_sim`） |
 | `fae_poc/` | FAE 平台客户端入口（`config.ini` + `NCELogin.py` 由用户本地放置） |
+| `pyproject.toml` | Python 依赖（uv 管理） |
 
 ## Agent 列表
 
 | Agent | 类型 | 调用的 Skills |
 |---|---|---|
-| `fae:orchestrator` | 路由 | 通过 `Agent()` 派发给下属 5 个 SubAgent |
+| `fae:orchestrator` | 路由 | 通过 `Agent` 工具委派给下属 5 个 SubAgent |
 | `fae:planning` | 决策 | goal_parsing / plan_design / plan_review / plan_store |
 | `fae:insight` | 决策 | insight_plan / insight_decompose / insight_query / insight_nl2code / insight_reflect / insight_report |
 | `fae:provisioning-wifi` | 执行 | wifi_simulation |
@@ -31,7 +30,7 @@ Hummingbird 的 free-code 插件：家宽网络调优多 Agent 系统。
 
 ## Skill 调用约定
 
-Agent 通过 free-code 的 Bash / Read 工具调用 Skill：
+Agent 通过 free-code 的 Bash / Read 工具调用 Skill（不需要 agno 那套 `get_skill_*` 间接层）：
 
 ```bash
 # 1. 加载 Skill 指令
@@ -40,7 +39,7 @@ Read: $CC_BRIDGE_FREE_CODE_PLUGIN_DIR/skills/<name>/SKILL.md
 # 2. 按需读取参考文件
 Read: $CC_BRIDGE_FREE_CODE_PLUGIN_DIR/skills/<name>/references/<ref>
 
-# 3. 执行 Python 脚本
+# 3. 执行 Python 脚本（cwd 为 plugin 根目录，激活 venv）
 Bash: cd "$CC_BRIDGE_FREE_CODE_PLUGIN_DIR" && uv run python skills/<name>/scripts/<script>.py '<json_args>'
 ```
 
@@ -64,4 +63,4 @@ cp fae_poc/config.ini.example fae_poc/config.ini
 - **决策型 Agent**（Planning / Insight）— 产出方案或报告，不执行 Provisioning
 - **执行型 Agent**（Provisioning × 3）— 接收载荷调用对应 Skill，不做业务规则判断
 - **Orchestrator** — 仅负责路由 + 派发，不推导 Skill 参数（参数提取是 Provisioning 的职责）
-- 3 个 Provisioning Agent 共享 `prompts/provisioning.md`，通过 `description` 注入专业方向
+- 3 个 Provisioning Agent 的 system prompt 内容相似，按各自专业方向独立内联在 `agents/provisioning-*.md`，不再共享外部 prompt 文件
