@@ -60,12 +60,16 @@ async def send_message(conv_id: str, body: SendMessageRequest):
         from api.opencode_bridge import OpenCodeClient
 
         oc = OpenCodeClient(base_url=engine_cfg["opencode_url"])
+        # Bug5 fix: 提前创建/获取 session，把 sid 直接传给 adapt_opencode，
+        # 消除 main_session_id 从首条事件推断的竞态风险。
+        # ensure_session 内部有缓存（_session_map），后续 send_and_stream 二次调用无额外 HTTP。
+        oc_sid = await oc.ensure_session(conv_id)
         raw_stream = oc.send_and_stream(
             conv_id,
             body.content,
             agent=engine_cfg.get("opencode_agent", "orchestrator"),
         )
-        adapter_factory = lambda: adapt_opencode(conv_id, raw_stream)  # noqa: E731
+        adapter_factory = lambda: adapt_opencode(conv_id, raw_stream, session_id=oc_sid)  # noqa: E731
     else:
         # ── agno 通道（现有逻辑不变）──
         # 取 SessionContext（含 team / tracer / observability DB session_id）
