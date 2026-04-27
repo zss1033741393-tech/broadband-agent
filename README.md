@@ -1,170 +1,67 @@
-# 家宽网络调优智能助手
+# fae plugin
 
-基于 [agno](https://github.com/agno-agi/agno) 框架构建的家宽网络调优场景多智能体系统，采用 **Team (coordinate 模式) + 16 个业务 Skills** 的分层架构。
+Hummingbird 的 free-code 插件：家宽网络调优多 Agent 系统。
 
-## 功能特性
+由 Hummingbird `cc-bridge` 通过 `--plugin-dir` 加载到 free-code 子进程。
+完整集成方案见 Hummingbird 仓库 [docs/fae-plugin-integration.md](https://github.com/zss1033741393-tech/Hummingbird/blob/fan-fae-dev/docs/fae-plugin-integration.md)。
 
-支持四类任务入口：
+## 目录结构
 
-1. **综合目标** — 用户描述业务目标，PlanningAgent 追问画像 → 产出分段方案 → 并行派发多个 Provisioning 实例执行
-2. **数据洞察** — InsightAgent 按 Plan → Decompose → Execute → Reflect → Report 五阶段产出数据 / 归因 / ECharts 图表 / Markdown 报告，结果可回流 Planning 生成优化方案
-3. **单点功能** — Orchestrator 关键词路由直达对应 Provisioning 实例（WIFI 仿真 / 差异化承载 / 故障定界 / 远程操作 / CEI 权重配置）
-4. **编辑方案** — 用户要求修改当前保障方案的具体字段，Orchestrator 路由至 PlanningAgent（跳过 goal_parsing），通过 plan_store 从 DB 读取当前方案，应用编辑指令后输出修改后的完整方案
+| 路径 | 用途 |
+|---|---|
+| `plugin.json` | free-code 插件清单（声明 `name: "fae"`，仅暴露 agents） |
+| `agents/` | 6 个 Agent 定义（Orchestrator + 5 SubAgents） |
+| `hooks/` | session_start hook：自动 `uv sync` 准备 Python 环境 |
+| `prompts/` | Agent system prompt 源文件（被 agents/ 通过 Read 加载） |
+| `skills/` | 16 个 Python Skill 实现（Agent 通过 Bash 调用） |
+| `configs/agents.yaml` | 原 agno Team 结构参考 |
+| `vendor/` | 本地 editable Python 包（`ce_insight_core` / `fae_sim`） |
+| `fae_poc/` | FAE 平台客户端入口（`config.ini` + `NCELogin.py` 由用户本地放置） |
 
-## 架构
+## Agent 列表
 
-```
-OrchestratorTeam (leader, coordinate 模式)
-  ├─ PlanningAgent            (goal_parsing + plan_design + plan_review + plan_store)
-  ├─ InsightAgent             (insight_plan + insight_decompose + insight_query
-  │                              + insight_nl2code + insight_reflect + insight_report)
-  ├─ ProvisioningWifiAgent    (wifi_simulation)              ← 单 Skill 内部 2 能力 (RSSI 热力图 + 卡顿率栅格) ± AP 补点对比
-  ├─ ProvisioningDeliveryAgent (experience_assurance)
-  └─ ProvisioningCeiChainAgent (cei_pipeline + cei_score_query
-                                + fault_diagnosis + remote_optimization)
-                                                             ← 顺序串行 workflow
-```
+| Agent | 类型 | 调用的 Skills |
+|---|---|---|
+| `fae:orchestrator` | 路由 | 通过 `Agent()` 派发给下属 5 个 SubAgent |
+| `fae:planning` | 决策 | goal_parsing / plan_design / plan_review / plan_store |
+| `fae:insight` | 决策 | insight_plan / insight_decompose / insight_query / insight_nl2code / insight_reflect / insight_report |
+| `fae:provisioning-wifi` | 执行 | wifi_simulation |
+| `fae:provisioning-delivery` | 执行 | experience_assurance |
+| `fae:provisioning-cei-chain` | 执行 | cei_pipeline / cei_score_query / fault_diagnosis / remote_optimization |
 
-3 个 Provisioning 实例**共享** `prompts/provisioning.md`，通过 `description` 字段注入各自的功能目标。
+## Skill 调用约定
 
-### 业务 Skill 设计模式
-
-- **`plan_design`**：Instructional 范式 — 纯 SKILL.md + few-shot 样例，**无脚本**，由 LLM 直接生成分段 Markdown 方案
-- **`cei_pipeline / cei_score_query / fault_diagnosis / remote_optimization / experience_assurance`**：Tool Wrapper 范式 — 封装 FAE / FAN 平台真实接口，CLI args 驱动，依赖 `fae_poc/` 共享的 NCELogin + config.ini（`fault_diagnosis` 脚本内部自驱 start+poll+query 三阶段，Agent 仅感知一次 tool call；`experience_assurance` 由 Provisioning 层完成"业务字段 → UUID 参数"映射，映射表见 `experience_assurance/references/assurance_parameters.md`）
-- **`plan_store`**：Tool Wrapper 范式 — 封装 `data/api.db` 的保障方案读写操作，`read_plan.py` 读取当前方案，`save_plan.py` 解析 5 段式方案文本并持久化；仅 PlanningAgent 调用（场景 1/2 确认后保存、场景 4 编辑前读取）
-- **`goal_parsing / plan_review`**：Inversion + Reviewer — 有状态/确定性任务保留脚本
-- **`insight_*`**（6 个 Skill）：Pipeline — Plan → [Decompose → Execute → Reflect] × N Phase → Report 驱动，接入 `ce_insight_core` 真实计算内核（三元组查询 + 12 种洞察函数 + NL2Code 沙箱）
-- **`wifi_simulation`**：Pipeline + Generator — 接入自包含的 `home_wifi_engine`，按 `compare` 开关分派 basic（RSSI 热力图 + 卡顿率栅格）或 compare（AP 补点前后对比图 + 4 份 JSON 矩阵）模式，stdout 为单行结构化 JSON
-
-## 技术栈
-
-- Python 3.11 + [uv](https://docs.astral.sh/uv/) (包管理) + agno >= 2.5.14
-- Gradio (Web UI，流式事件处理 + SubAgent 徽章)
-- loguru (应用日志) + SQLite (会话持久化 + 完整轨迹存储) + JSONL (按天归档 trace)
-- Jinja2 (配置模板渲染)
-- pandas / numpy / scipy / scikit-learn (数据洞察科学计算栈)
-
-## 快速开始
-
-### 使用 uv（推荐）
+Agent 通过 free-code 的 Bash / Read 工具调用 Skill：
 
 ```bash
-# 安装全部依赖（含 vendor/ce_insight_core editable 安装）
+# 1. 加载 Skill 指令
+Read: $CC_BRIDGE_FREE_CODE_PLUGIN_DIR/skills/<name>/SKILL.md
+
+# 2. 按需读取参考文件
+Read: $CC_BRIDGE_FREE_CODE_PLUGIN_DIR/skills/<name>/references/<ref>
+
+# 3. 执行 Python 脚本
+Bash: cd "$CC_BRIDGE_FREE_CODE_PLUGIN_DIR" && uv run python skills/<name>/scripts/<script>.py '<json_args>'
+```
+
+`CC_BRIDGE_FREE_CODE_PLUGIN_DIR` 由 Hummingbird cc-bridge 透传给 free-code 子进程。
+
+## 本地准备
+
+```bash
+# 1. 安装依赖（vendor editable 包 + Python 库）
 uv sync
 
-# 安装开发依赖（pytest + ruff）
-uv sync --group dev
-
-# 设置 API Key
-export OPENAI_API_KEY="your-api-key"
-
-# 启动应用
-uv run python ui/app.py
+# 2. 配置 FAE 凭证（如需运行 Provisioning skills）
+cp fae_poc/config.ini.example fae_poc/config.ini
+# 编辑 config.ini，并把本地 NCELogin.py 复制到 fae_poc/NCELogin.py
 ```
 
-### 使用 pip
+## 开发约束
 
-```bash
-pip install -r requirements.txt
-export OPENAI_API_KEY="your-api-key"
-python ui/app.py
-```
+参考 [.claude/rules/skills_rules.md](.claude/rules/skills_rules.md)（Skills 设计范式规范）。
 
-### 企业代理环境
-
-如果启动时报 `Couldn't start the app because 'http://localhost:7860/gradio_api/startup-events' failed (code 504)`，说明公司代理拦截了 Gradio 的 localhost 自检请求。启动前设置：
-
-```bash
-# Linux / macOS
-export NO_PROXY="localhost,127.0.0.1"
-
-# Windows PowerShell
-$env:NO_PROXY="localhost,127.0.0.1"
-```
-
-> 注意：当前 `server_name="0.0.0.0"` 会监听所有网卡，同网段的其他人可以通过你的 IP 访问。如果需要限制为仅本机访问，将 `ui/app.py` 中的 `server_name` 改为 `"127.0.0.1"`。
-
-访问 http://localhost:7860 开始使用。
-
-### vendor 子包更新
-
-`vendor/ce_insight_core/` 以 **editable** 模式安装（`[tool.uv.sources]` 声明了 `editable = true`）。日常开发：
-
-- **修改 Python 源码**（`vendor/ce_insight_core/src/` 下的 `.py` 文件）→ **无需重新安装**，改动自动生效
-- **修改 `pyproject.toml`**（新增依赖 / 改版本号 / 改 entry points）→ 需要重新执行 `uv sync`
-- **从上游同步新版本** → `uv sync` 会重新解析依赖关系
-
-## 项目结构
-
-```
-├── pyproject.toml          # 项目依赖声明 (uv 规范源)
-├── .python-version         # Python 版本锁定 (uv sync 使用)
-├── requirements.txt        # pip 兼容依赖 (指向 pyproject.toml 为规范源)
-├── configs/
-│   ├── model.yaml          # 模型 provider/endpoint
-│   └── agents.yaml         # Team + 5 个 SubAgent 配置
-├── prompts/
-│   ├── orchestrator.md     # Team leader 作业手册
-│   ├── planning.md         # PlanningAgent 作业手册
-│   ├── insight.md          # InsightAgent 作业手册
-│   └── provisioning.md     # 3 个 Provisioning 实例共享的作业手册
-├── skills/                 # 16 个业务 Skill (LocalSkills 自动扫描)
-│   ├── goal_parsing/       # 槽位追问引擎
-│   ├── plan_design/        # 方案设计 (Instructional, 无脚本)
-│   ├── plan_review/        # 方案评审 (violations + recommendations)
-│   ├── plan_store/         # 方案持久化 (Tool Wrapper, read_plan + save_plan, 对接 data/api.db)
-│   ├── cei_pipeline/       # CEI 权重配置下发 (Tool Wrapper, 对接 FAE 真实接口)
-│   ├── cei_score_query/    # CEI 体验查询 (Tool Wrapper, 对接 FAE 真实接口)
-│   ├── fault_diagnosis/    # 故障诊断 (Tool Wrapper, 对接 FAE 真实接口, 内部 start+poll+query)
-│   ├── remote_optimization/# 远程优化动作 (Tool Wrapper, 对接 FAE 真实接口)
-│   ├── experience_assurance/ # 差异化承载 (Tool Wrapper, 对接 FAN 网络切片服务 app-flow 接口)
-│   ├── wifi_simulation/    # WIFI 仿真 (home_wifi_engine 自包含: RSSI 热力图 + 卡顿率栅格 ± AP 补点对比)
-│   ├── insight_plan/       # 洞察规划 (Instructional, MacroPlan 生成)
-│   ├── insight_decompose/  # Phase 分解 (Tool Wrapper, list_schema.py + 参考文件)
-│   ├── insight_query/      # 洞察执行 (Tool Wrapper, run_insight.py + run_query.py)
-│   ├── insight_nl2code/    # NL2Code 沙箱 (Tool Wrapper, run_nl2code.py)
-│   ├── insight_reflect/    # Phase 反思 (Instructional, A/B/C/D 决策)
-│   └── insight_report/     # 洞察报告渲染 (Generator, render_report.py)
-├── vendor/
-│   └── ce_insight_core/    # 洞察计算内核 (editable 安装, 三元组查询 + 12 种洞察策略)
-├── fae_poc/                # FAE 平台共享基础设施 (NCELogin + config.ini, .gitignore)
-├── core/
-│   ├── agent_factory.py    # create_team() — 装配 Team + 5 SubAgent
-│   ├── session_manager.py  # session_hash → Team + Tracer 隔离
-│   ├── model_loader.py     # 模型实例化 + prompt tracer 注入
-│   └── observability/      # SQLite DAO + loguru sink + JSONL tracer
-├── ui/
-│   ├── app.py              # Gradio 入口 (Team 流式事件处理)
-│   └── chat_renderer.py    # SubAgent 徽章 + 工具调用折叠/展开渲染
-└── tests/test_smoke.py     # 冒烟测试
-```
-
-## 可观测性
-
-完整的轨迹存储体系，覆盖 agent/subagent 交互全流程：
-
-- **SQLite 数据库** (`data/sessions.db`)：4 张表 — `sessions`（会话生命周期）、`messages`（用户/assistant 消息，含 SubAgent 回复）、`tool_calls`（Skill 调用记录，含 latency_ms + message_id 关联 + 成功/失败状态）、`traces`（全量事件轨迹，含 agent_name 索引列）
-- **JSONL 日志** (`data/logs/trace/YYYY-MM-DD.jsonl`)：按天归档，完整记录不截断，每条含 agent / is_leader 字段，并行 SubAgent 通过 agent 字段天然隔离
-- **应用日志** (`data/logs/app/`)：loguru 按天轮转，7 天保留
-
-DB 和 JSONL 双写：任一写入失败不影响主流程。Tracer 通过 monkey-patch 注入 Team leader 和所有 member 的 model，自动拦截 LLM 调用记录完整 prompt。
-
-## 配置说明
-
-- `pyproject.toml` — 项目依赖声明（uv 规范源），含 ruff / pytest 配置
-- `configs/model.yaml` — 模型 provider / endpoint / role_map
-- `configs/agents.yaml` — Team + 5 个 SubAgent 的 prompt + skills 子集 + description + memory
-- `skills/goal_parsing/references/slot_schema.yaml` — 综合目标槽位定义
-- `skills/plan_design/references/examples.md` — 方案设计 few-shot 样例
-
-## 测试
-
-```bash
-# uv
-uv run pytest tests/test_smoke.py -v
-
-# pip
-pytest tests/test_smoke.py -v
-```
-
-51 项冒烟测试，覆盖配置加载、16 个 Skill 脚本执行、UI 渲染（流式事件处理 + 思考隔离 + 工具调用折叠）、Team 装配（5 SubAgent + 正确 Skill 子集）、可观测性（SQLite schema + trace 双写）。
+- **决策型 Agent**（Planning / Insight）— 产出方案或报告，不执行 Provisioning
+- **执行型 Agent**（Provisioning × 3）— 接收载荷调用对应 Skill，不做业务规则判断
+- **Orchestrator** — 仅负责路由 + 派发，不推导 Skill 参数（参数提取是 Provisioning 的职责）
+- 3 个 Provisioning Agent 共享 `prompts/provisioning.md`，通过 `description` 注入专业方向
