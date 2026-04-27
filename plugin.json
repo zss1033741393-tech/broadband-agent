@@ -1,0 +1,9 @@
+{
+  "name": "fae",
+  "version": "0.1.0",
+  "description": "家宽网络调优多 Agent 系统（Orchestrator + 5 SubAgents + 16 Skills）",
+  "author": {
+    "name": "fae-plugin team"
+  },
+  "hooks": "./hooks/hooks.json"
+}

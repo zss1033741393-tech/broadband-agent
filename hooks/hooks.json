@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "session_start": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CC_BRIDGE_FREE_CODE_PLUGIN_DIR}/hooks/ensure-uv-env.sh\""
+          }
+        ]
+      }
+    ]
+  }
+}
