@@ -15,6 +15,7 @@ Hummingbird 的 free-code 插件：家宽网络调优多 Agent 系统。
 | `skills/` | 16 个 Python Skill 实现（Agent 通过 Bash 调用） |
 | `vendor/` | 本地 editable Python 包（`ce_insight_core` / `fae_sim`） |
 | `fae_poc/` | FAE 平台客户端入口（`config.ini` + `NCELogin.py` 由用户本地放置） |
+| `configs/` | 数据路径配置（`data_paths.yaml`：insight 类 skill 真实 parquet 路径，默认 `mock`） |
 | `pyproject.toml` | Python 依赖（uv 管理） |
 
 ## Agent 列表
